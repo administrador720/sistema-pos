@@ -54,9 +54,8 @@ def api(tmp_path, monkeypatch):
     db.engine.dispose()
 
 
-@pytest.fixture()
-def tienda(api):
-    """Negocio configurado, con un administrador, un cajero y algunos productos."""
+def crear_tienda(api):
+    """Negocio configurado, con un administrador, un cajero y tres productos."""
     r = api.post("/api/setup", {"negocio": {"nombre": "Super Prueba", "nit": "900123"},
                                 "admin": {"nombre": "Ana Admin", "usuario": "admin", "password": "secreto1", "pin": "1234"}})
     api.token = api.ok(r)["token"]
@@ -80,6 +79,11 @@ def tienda(api):
     t.admin_token = api.token
     t.categorias = cat["categorias"]
     return t
+
+
+@pytest.fixture()
+def tienda(api):
+    return crear_tienda(api)
 
 
 def abrir_turno_cajero(t, base=100000):

@@ -10,6 +10,7 @@ import gzip
 import shutil
 import sqlite3
 import tempfile
+import zlib
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -123,14 +124,17 @@ def restaurar(db: Session, usuario: m.Usuario, archivo: str, password: str) -> s
         raise ErrorNegocio("El respaldo no existe en la carpeta de respaldos.", 404)
     with tempfile.TemporaryDirectory() as tmp:
         plano = Path(tmp) / "restaurar.db"
-        with gzip.open(origen, "rb") as f_in, open(plano, "wb") as f_out:
-            shutil.copyfileobj(f_in, f_out)
-        chequeo = sqlite3.connect(plano)
         try:
-            ok = chequeo.execute("PRAGMA integrity_check").fetchone()[0]
-            tablas = {r[0] for r in chequeo.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        finally:
-            chequeo.close()
+            with gzip.open(origen, "rb") as f_in, open(plano, "wb") as f_out:
+                shutil.copyfileobj(f_in, f_out)
+            chequeo = sqlite3.connect(plano)
+            try:
+                ok = chequeo.execute("PRAGMA integrity_check").fetchone()[0]
+                tablas = {r[0] for r in chequeo.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            finally:
+                chequeo.close()
+        except (OSError, EOFError, gzip.BadGzipFile, zlib.error, sqlite3.DatabaseError):
+            raise ErrorNegocio("El archivo de respaldo está dañado o no es de este sistema.", 422)
         if ok != "ok" or "ventas" not in tablas or "usuarios" not in tablas:
             raise ErrorNegocio("El archivo de respaldo está dañado o no es de este sistema.", 422)
         previo = crear_respaldo(db, tipo="previo_restauracion", usuario_id=usuario.id)

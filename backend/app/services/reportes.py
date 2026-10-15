@@ -239,7 +239,7 @@ def r_ventas_medio_pago(db, d, h, **_):
 
 
 def r_ventas_hora(db, d, h, **_):
-    filas = Q(db, "SELECT strftime('%H', fecha) || ':00' hora, COUNT(*) tiquetes, SUM(total) ventas, ROUND(AVG(total)) ticket "
+    filas = Q(db, "SELECT strftime('%H', fecha) || '\\:00' hora, COUNT(*) tiquetes, SUM(total) ventas, ROUND(AVG(total)) ticket "
                   "FROM ventas WHERE estado='completada' AND fecha >= :d AND fecha < :h GROUP BY 1 ORDER BY 1", **_par(d, h))
     return _tabla("Ventas por hora", [_col("hora", "Hora"), _col("tiquetes", "Tiquetes", "entero"), _col("ventas", "Ventas", "dinero"),
                                       _col("ticket", "Ticket promedio", "dinero")], filas, _suma(filas, "tiquetes", "ventas"),
