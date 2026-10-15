@@ -33,21 +33,30 @@ todo con teclado y lector de código de barras.
 
 ## Cómo empezar
 
-### Con datos de demostración (para conocerlo)
+### En Windows (paso a paso)
 
-Requiere **Python 3.11 o superior**.
+1. **Instale Python** desde <https://www.python.org/downloads/>. Durante la instalación **marque la casilla "Add python.exe to PATH"**. Se necesita la versión 3.11 o superior.
+2. **Descargue el programa**: en GitHub entre al repositorio, botón verde **Code → Download ZIP**
+   (o directo: <https://github.com/administrador720/sistema-pos/archive/refs/heads/claude/awesome-fermi-sodsun.zip>) y descomprímalo, por ejemplo en `C:\POS`.
+3. Abra la carpeta descomprimida y haga **doble clic en `iniciar.bat`**.
+   La primera vez necesita internet y tarda unos minutos preparando todo; después abre en segundos.
+4. La primera vez le pide los datos del negocio y crea al administrador.
+
+> **Desde la ventana de comandos** (cmd) primero entre a la carpeta y luego escriba solo `iniciar.bat`
+> (sin `./` y sin `.sh`; ese archivo es para Linux/macOS):
+> ```
+> cd C:\POS\sistema-pos-claude-awesome-fermi-sodsun
+> iniciar.bat
+> ```
+
+Para **conocerlo con datos de ejemplo** haga doble clic en `demo.bat` (borra lo que haya, no lo use en la tienda) y luego abra `iniciar.bat`.
+Usuarios de la demostración: `admin` / `demo1234` (PIN 1234) · `ana` / `ana1234` y `luis` / `luis1234` (PIN 4321).
+
+### En Linux o macOS
 
 ```bash
-# Windows: doble clic en iniciar.bat           Linux/macOS: ./iniciar.sh
-# (la primera vez crea el entorno e instala lo necesario)
-```
-
-Para ver el panel con historia real, cargue la demostración **antes** del primer uso (borra datos existentes con `--forzar`):
-
-```bash
-cd backend
-python -m app.seed_demo --dias 30 --ventas-dia 90 --forzar
-# usuarios: admin / demo1234 (PIN 1234) · ana / ana1234 (PIN 4321) · luis / luis1234 (PIN 4321)
+./iniciar.sh                                              # la primera vez prepara el entorno
+cd backend && ../.venv/bin/python -m app.seed_demo --forzar   # opcional: datos de ejemplo
 ```
 
 ### En la tienda

@@ -26,7 +26,7 @@ RETENCION_MENSUALES = 12
 
 
 def _copiar_sqlite(origen: Path, destino: Path):
-    src = sqlite3.connect(f"file:{origen}?mode=ro", uri=True, timeout=30)
+    src = sqlite3.connect(f"{Path(origen).resolve().as_uri()}?mode=ro", uri=True, timeout=30)  # as_uri(): válido también en Windows (file:///C:/…)
     dst = sqlite3.connect(destino)
     try:
         src.backup(dst)

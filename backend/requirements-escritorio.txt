@@ -1,0 +1,4 @@
+# Opcionales: si alguno no se instala, el sistema funciona igual (se abre en el navegador / sin cajón)
+pywebview>=5.0                        # ventana propia en vez del navegador
+pyserial>=3.5                         # cajón monedero por puerto serie / USB
+pywin32>=306; sys_platform == "win32" # cajón conectado a una impresora de Windows
