@@ -2,10 +2,15 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 from datetime import date, datetime, time, timedelta
+from pathlib import Path
 
 from fastapi import APIRouter
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 from sqlalchemy import select
 
 from .. import config
@@ -67,3 +72,26 @@ def auditoria(_: Admin, db: DB, desde: date | None = None, hasta: date | None = 
         "entidad": a.entidad, "entidad_id": a.entidad_id, "autorizado_por": nombres.get(a.autorizado_por),
         "antes": json.loads(a.datos_antes) if a.datos_antes else None,
         "despues": json.loads(a.datos_despues) if a.datos_despues else None} for a in db.scalars(q)]}
+
+
+class AbrirIn(BaseModel):
+    ruta: str
+
+
+@router.post("/sistema/abrir")
+def abrir_exportado(body: AbrirIn, _: Admin):
+    """Abre un archivo exportado con el programa predeterminado (Excel, visor de PDF).
+    Solo permite archivos dentro de la carpeta de exportes."""
+    base = config.dir_exportes().resolve()
+    ruta = Path(body.ruta).resolve()
+    if base not in ruta.parents or not ruta.is_file():
+        raise ErrorNegocio("Archivo no permitido.", 403)
+    try:
+        if sys.platform == "win32":
+            os.startfile(str(ruta))  # type: ignore[attr-defined]
+        else:
+            subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", str(ruta)],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        return {"ok": False}
+    return {"ok": True}
