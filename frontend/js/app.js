@@ -42,16 +42,20 @@ const Raiz = {
     }
     async function alIngresar() { await iniciarSesionCargada(); irInicio(); }
 
-    const nombreRuta = computed(() => store.ruta.nombre);
-    const vista = computed(() => {
-      let n = nombreRuta.value;
+    // pantalla efectiva: un cajero que escribe una dirección de administración vuelve a su pantalla
+    const nombreRuta = computed(() => {
+      let n = store.ruta.nombre;
       if (!n || !VISTAS[n] || (SOLO_ADMIN.has(n) && !esAdmin())) n = esAdmin() ? 'dashboard' : (store.turno ? 'caja' : 'apertura');
-      return VISTAS[n];
+      return n;
     });
+    const vista = computed(() => VISTAS[nombreRuta.value]);
     const claveVista = computed(() => nombreRuta.value + '/' + store.ruta.arg);
-    const titulo = computed(() => TITULOS[nombreRuta.value] || (esAdmin() ? 'Panel de control' : 'Caja'));
+    const titulo = computed(() => TITULOS[nombreRuta.value]);
 
-    watch(() => store.ruta.nombre, n => { store.mini = n === 'caja'; menu.value = false; }, { immediate: true });
+    watch(nombreRuta, n => {
+      store.mini = n === 'caja'; menu.value = false;
+      if (store.usuario && store.ruta.nombre !== n) history.replaceState(null, '', '#/' + n);
+    }, { immediate: true });
 
     const nav = computed(() => {
       const items = [{ grupo: 'Operación' },

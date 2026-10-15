@@ -122,6 +122,7 @@ def generar(dias: int = 30, ventas_dia: int = 90, semilla: int = 7):
         impuestos = {i.nombre: i for i in s.scalars(select(m.Impuesto))}
         medios = {x.nombre: x for x in s.scalars(select(m.MedioPago))}
         objetivos: dict[int, tuple[int, int]] = {}
+        costo_base: dict[int, float] = {}
         productos = []
         for n, (nombre, cat, pv, imp, costo, precio, stock, minimo) in enumerate(CATALOGO, start=1):
             p = prod_svc.crear(s, admin, {
@@ -129,6 +130,7 @@ def generar(dias: int = 30, ventas_dia: int = 90, semilla: int = 7):
                 "costo_promedio": costo, "precio_venta": precio, "stock_inicial": int(stock * 0.9), "stock_minimo": minimo,
                 "stock_maximo": stock * 2, "ubicacion": f"Pasillo {1 + n % 8}", "codigos": [{"codigo": ean13(n), "unidades": 1}]})
             objetivos[p.id] = (stock, minimo)
+            costo_base[p.id] = costo
             productos.append(p)
         s.commit()
         pesos = [1 / ((i + 1) ** 0.85) for i in range(len(productos))]
@@ -144,9 +146,9 @@ def generar(dias: int = 30, ventas_dia: int = 90, semilla: int = 7):
             for p in productos:
                 objetivo, minimo = objetivos[p.id]
                 if p.stock_actual <= minimo * 1.3:
-                    deriva = 1 + 0.0025 * d + rnd.uniform(-0.03, 0.04)  # el costo sube con el tiempo
+                    deriva = 1 + 0.0015 * d + rnd.uniform(-0.02, 0.03)  # inflación lenta sobre el costo de catálogo
                     por_prov.setdefault(p.proveedor_id, []).append(
-                        {"producto_id": p.id, "cantidad": max(1, objetivo - p.stock_actual), "costo_unitario": round(p.costo_promedio * deriva)})
+                        {"producto_id": p.id, "cantidad": max(1, objetivo - p.stock_actual), "costo_unitario": round(costo_base[p.id] * deriva)})
             for prov_id, items in por_prov.items():
                 compras_svc.crear_compra(s, admin, {"proveedor_id": prov_id, "numero_factura": f"FV-{dia:%m%d}-{prov_id}", "items": items})
             fijar(6, 45)

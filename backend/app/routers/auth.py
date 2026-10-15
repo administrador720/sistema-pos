@@ -74,7 +74,7 @@ def verificar(body: SecretoIn, u: Usuario, db: DB):
         limitador.exito(clave)
         return {"ok": True}
     limitador.fallo(clave)
-    raise ErrorNegocio("PIN o contraseña incorrectos.", 403, "PIN_INCORRECTO")
+    raise ErrorNegocio("PIN o contraseña incorrectos.", 403, "VERIFICACION_FALLIDA")
 
 
 @router.post("/auth/autorizar")

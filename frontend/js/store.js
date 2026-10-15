@@ -47,8 +47,8 @@ export function confirmar(titulo, mensaje, { peligro = false, textoOk = 'Confirm
   return new Promise(resolver => { store.confirmacion = { titulo, mensaje, peligro, textoOk, textoNo, resolver }; });
 }
 
-export function pedirTexto(titulo, etiqueta, { valor = '', multilinea = false, textoOk = 'Aceptar', obligatorio = true, ayuda = '' } = {}) {
-  return new Promise(resolver => { store.pregunta = { titulo, etiqueta, valor, multilinea, textoOk, obligatorio, ayuda, resolver }; });
+export function pedirTexto(titulo, etiqueta, { valor = '', multilinea = false, textoOk = 'Aceptar', obligatorio = true, ayuda = '', secreto = false } = {}) {
+  return new Promise(resolver => { store.pregunta = { titulo, etiqueta, valor, multilinea, textoOk, obligatorio, ayuda, secreto, resolver }; });
 }
 
 export function setTema(tema) {

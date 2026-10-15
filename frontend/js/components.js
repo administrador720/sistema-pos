@@ -230,7 +230,7 @@ export const DialogoTexto = {
     <Modal v-if="store.pregunta" :titulo="store.pregunta.titulo" ancho="sm" @cerrar="cerrar(false)">
       <div class="field"><label>{{ store.pregunta.etiqueta }}</label>
         <textarea v-if="store.pregunta.multilinea" ref="el" class="input" v-model="v"></textarea>
-        <input v-else ref="el" class="input lg" v-model="v" @keydown.enter="valido && cerrar(true)" autocomplete="off">
+        <input v-else ref="el" class="input lg" :type="store.pregunta.secreto ? 'password' : 'text'" v-model="v" @keydown.enter="valido && cerrar(true)" autocomplete="off">
         <span class="hint" v-if="store.pregunta.ayuda">{{ store.pregunta.ayuda }}</span></div>
       <template #pie><button class="btn" @click="cerrar(false)">Cancelar</button>
         <button class="btn primary" :disabled="!valido" @click="cerrar(true)">{{ store.pregunta.textoOk }}</button></template>
