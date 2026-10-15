@@ -180,6 +180,8 @@ const Revision = {
       const f = { dif: x => !x.no_contado && x.diferencia !== 0, falt: x => x.diferencia < 0, sob: x => x.diferencia > 0, rec: x => x.racha_faltantes >= 2, nc: x => x.no_contado, todos: () => true }[filtro.value];
       return r.value.items.filter(f);
     });
+    const LIMITE = 400;
+    const visibles = computed(() => filas.value.slice(0, LIMITE));
     const cuenta = computed(() => { const it = r.value?.items || []; return { dif: it.filter(x => !x.no_contado && x.diferencia !== 0).length, falt: it.filter(x => x.diferencia < 0).length, sob: it.filter(x => x.diferencia > 0).length,
       rec: it.filter(x => x.racha_faltantes >= 2).length, nc: it.filter(x => x.no_contado).length, todos: it.length }; });
     const seleccion = computed(() => Object.keys(sel).filter(k => sel[k]).map(Number));
@@ -196,7 +198,7 @@ const Revision = {
         try { await api.post(`/api/conteos/${p.conteo.id}/cancelar`); emit('cambio'); } catch (e) { errorToast(e); } }
     }
     const exportar = f => exportarArchivo(`/api/conteos/${p.conteo.id}/informe`, {}, f, `conteo-${p.conteo.id}`).catch(errorToast);
-    return { r, filtro, sel, filas, cuenta, seleccion, editable, dlgAplicar, asumir, cargando, reconteo, aplicar, cancelar, exportar, peso, entero, porcentaje };
+    return { r, filtro, sel, filas, visibles, cuenta, seleccion, editable, dlgAplicar, asumir, cargando, reconteo, aplicar, cancelar, exportar, peso, entero, porcentaje };
   },
   template: `
     <div class="stack lg" v-if="r">
@@ -214,13 +216,14 @@ const Revision = {
             <button class="btn sm" v-if="editable" :disabled="!seleccion.length" @click="reconteo"><Icono n="refrescar"/> Pedir reconteo ({{ seleccion.length }})</button></div>
         </div>
         <div class="table-wrap" style="max-height:calc(100vh - 430px)"><table class="t"><thead><tr><th v-if="editable" style="width:40px"></th><th>Producto</th><th>Ubicación</th><th class="num">Sistema</th><th class="num">Contado</th><th class="num">Diferencia</th><th class="num">Valor (costo)</th><th class="num">%</th><th></th></tr></thead><tbody>
-          <tr v-for="x in filas" :key="x.producto_id"><td v-if="editable"><input type="checkbox" v-model="sel[x.producto_id]"></td>
+          <tr v-for="x in visibles" :key="x.producto_id"><td v-if="editable"><input type="checkbox" v-model="sel[x.producto_id]"></td>
             <td><b>{{ x.nombre }}</b><div class="xs muted">{{ x.codigo }}</div></td><td class="muted">{{ x.ubicacion || '—' }}</td>
             <td class="num">{{ x.no_contado ? entero(x.stock_teorico) : entero(x.stock_teorico) }}</td><td class="num"><b>{{ x.contado === null ? '—' : entero(x.contado) }}</b></td>
             <td class="num"><b :class="x.diferencia < 0 ? 'danger' : x.diferencia > 0 ? 'ok' : 'muted'">{{ x.diferencia === null ? '—' : (x.diferencia > 0 ? '+' : '') + x.diferencia }}</b></td>
             <td class="num" :class="x.valor_diferencia < 0 ? 'danger' : ''">{{ x.valor_diferencia === null ? '' : peso(x.valor_diferencia) }}</td><td class="num muted">{{ x.pct === null ? '' : porcentaje(x.pct) }}</td>
             <td><span class="chip danger" v-if="x.racha_faltantes >= 2">Faltante × {{ x.racha_faltantes }} conteos</span><span class="chip warn" v-if="x.no_contado">Sin contar</span><span class="chip" v-if="x.reconteo && !x.no_contado">Recontado</span></td></tr>
-          <tr v-if="!filas.length"><td colspan="9" class="empty">Nada en esta vista.</td></tr></tbody></table></div>
+          <tr v-if="!filas.length"><td colspan="9" class="empty">Nada en esta vista.</td></tr>
+          <tr v-if="filas.length > 400"><td colspan="9" class="muted center small">Se muestran los primeros 400 de {{ entero(filas.length) }} productos (los de mayor valor primero). Use los filtros o exporte a Excel para verlos todos.</td></tr></tbody></table></div>
       </div>
       <div class="row end" v-if="editable"><button class="btn danger" @click="cancelar">Cancelar conteo</button><button class="btn primary lg" @click="dlgAplicar = true"><Icono n="check"/> Aplicar ajustes al inventario…</button></div>
       <Modal v-if="dlgAplicar" titulo="Aplicar ajustes de inventario" ancho="sm" @cerrar="dlgAplicar = false"><div class="stack">

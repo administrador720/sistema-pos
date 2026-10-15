@@ -80,7 +80,11 @@ def get_db_w():
 # ───────────────────────────── Esquema y migraciones ─────────────────────────────
 # Cada migración es una función (conexión) que se ejecuta una sola vez, en orden. Para cambiar el esquema
 # después de instalar: agregar una función al final de MIGRACIONES; `create_all` solo crea tablas nuevas.
-MIGRACIONES: list = []
+def _m1_indice_ultima_venta(con):
+    con.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_venta_items_prod_venta ON venta_items (producto_id, venta_id)")
+
+
+MIGRACIONES: list = [_m1_indice_ultima_venta]
 
 
 def inicializar():

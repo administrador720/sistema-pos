@@ -238,6 +238,8 @@ class VentaItem(Base):
     venta: Mapped[Venta] = relationship(back_populates="items")
     producto: Mapped[Producto] = relationship()
 
+    __table_args__ = (Index("ix_venta_items_prod_venta", "producto_id", "venta_id"),)
+
 
 class VentaPago(Base):
     __tablename__ = "venta_pagos"

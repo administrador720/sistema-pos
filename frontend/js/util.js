@@ -17,7 +17,8 @@ export function decimal(n, d = 2) {
 export function porcentaje(n) { return n === null || n === undefined ? '—' : String(Number(n).toFixed(1)).replace('.', ',') + ' %'; }
 
 const pad = x => String(x).padStart(2, '0');
-export function aFecha(iso) { return iso ? new Date(String(iso).length === 10 ? iso + 'T00:00:00' : iso) : null; }
+// El servidor manda microsegundos (2026-10-15T21:19:00.123456); algunos motores solo aceptan milisegundos
+export function aFecha(iso) { return iso ? new Date(String(iso).length === 10 ? iso + 'T00:00:00' : String(iso).replace(/(\.\d{3})\d+/, '$1')) : null; }
 export function fecha(iso) { const d = aFecha(iso); return d ? `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}` : ''; }
 export function hora(iso) {
   const d = aFecha(iso); if (!d) return '';

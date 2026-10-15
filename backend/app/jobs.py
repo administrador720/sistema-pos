@@ -48,7 +48,7 @@ def tras_cierre_turno():
         with _lock:
             try:
                 _en_sesion(lambda s: inv.foto_inventario(s, hoy()))
-                _en_sesion(lambda s: respaldos.crear_respaldo(s, "turno"))
+                respaldos.crear_respaldo_seguro("turno")
             except Exception:  # noqa: BLE001
                 log.exception("Falló el trabajo posterior al cierre de turno")
     if os.environ.get("POS_SIN_JOBS") == "1":
@@ -67,21 +67,23 @@ def _hora_respaldo(s) -> tuple[int, int]:
 def tick():
     """Una pasada del planificador."""
     with _lock:
-        def trabajo(s):
+        # 1. fotos de inventario de días pasados que falten (la de hoy se toma al cerrar turno / respaldo)
+        _en_sesion(lambda s: inv.asegurar_fotos(s, hoy() - timedelta(days=7), hoy(), refrescar_hoy=False))
+        # 2. respaldo diario: se decide con una lectura y se hace SIN transacción de escritura abierta
+        s = db_mod.nueva_sesion()
+        try:
             ahora_ = ahora()
-            # 1. fotos de inventario de días pasados que falten (la de hoy se toma al cerrar turno / respaldo)
-            inv.asegurar_fotos(s, hoy() - timedelta(days=7), hoy(), refrescar_hoy=False)
-            # 2. respaldo diario
             h, mi = _hora_respaldo(s)
             hecho_hoy = s.scalar(select(func.count()).select_from(m.Respaldo).where(
                 m.Respaldo.tipo == "diario", func.date(m.Respaldo.fecha) == hoy().isoformat()))
             ultimo = s.scalar(select(func.max(m.Respaldo.fecha)))
-            hora_cumplida = (ahora_.hour, ahora_.minute) >= (h, mi)
-            atrasado = ultimo is None or (ahora_ - ultimo) > timedelta(hours=24)
-            if not hecho_hoy and (hora_cumplida or atrasado):
-                inv.foto_inventario(s, hoy())
-                respaldos.crear_respaldo(s, "diario")
-        _en_sesion(trabajo)
+        finally:
+            s.close()
+        hora_cumplida = (ahora_.hour, ahora_.minute) >= (h, mi)
+        atrasado = ultimo is None or (ahora_ - ultimo) > timedelta(hours=24)
+        if not hecho_hoy and (hora_cumplida or atrasado):
+            _en_sesion(lambda s: inv.foto_inventario(s, hoy()))
+            respaldos.crear_respaldo_seguro("diario")
 
 
 def _bucle():

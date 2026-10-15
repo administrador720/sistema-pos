@@ -35,6 +35,32 @@ WITH lineas AS (
 """
 
 
+
+POR_PRODUCTO = """
+SELECT pid, SUM(c) c, SUM(t) t, SUM(i) i, SUM(k) k FROM (
+  SELECT vi.producto_id pid, SUM(vi.cantidad) c, SUM(vi.total) t, SUM(vi.valor_impuesto) i, SUM(vi.cantidad * vi.costo_unitario) k
+    FROM venta_items vi JOIN ventas v ON v.id = vi.venta_id
+   WHERE v.estado = 'completada' AND v.fecha >= :d AND v.fecha < :h GROUP BY vi.producto_id
+  UNION ALL
+  SELECT di.producto_id, -SUM(di.cantidad), -SUM(di.total), -SUM(di.valor_impuesto), -SUM(di.cantidad * di.costo_unitario)
+    FROM devolucion_items di JOIN devoluciones dv ON dv.id = di.devolucion_id
+   WHERE dv.fecha >= :d AND dv.fecha < :h GROUP BY di.producto_id
+) GROUP BY pid
+"""
+
+
+def por_producto(db: Session, d: date, h: date) -> list[dict]:
+    """Ventas netas de devoluciones por producto: c=unidades, t=total con impuesto, i=impuesto, k=costo.
+    Se agrupa primero (≤ #productos filas) y los nombres se unen después: es lo que mantiene los informes
+    rápidos con un año de ventas."""
+    return Q(db, POR_PRODUCTO, **_par(d, h))
+
+
+def nombres_producto(db: Session) -> dict[int, tuple[str, str]]:
+    return {r["id"]: (r["nombre"], r["categoria"]) for r in Q(
+        db, "SELECT pr.id, pr.nombre, COALESCE(c.nombre, 'Sin categoría') categoria FROM productos pr LEFT JOIN categorias c ON c.id = pr.categoria_id")}
+
+
 def Q(db: Session, sql: str, **p) -> list[dict]:
     return [dict(r) for r in db.execute(text(sql), p).mappings()]
 
@@ -63,20 +89,20 @@ def _col(key, titulo, tipo="texto"):
 
 
 # ───────────────────────────── Dashboard ─────────────────────────────
-def _kpis(db: Session, d: date, h: date) -> dict:
+def _kpis(db: Session, d: date, h: date, filas: list[dict] | None = None) -> dict:
     p = _par(d, h)
-    r = Q(db, LINEAS + "SELECT COALESCE(SUM(total),0) ventas, COALESCE(SUM(impuesto),0) imp, "
-                       "COALESCE(SUM(costo),0) costo FROM lineas", **p)[0]
+    if filas is None:
+        filas = Q(db, POR_PRODUCTO, **p)
+    ventas, imp = sum(f["t"] for f in filas), sum(f["i"] for f in filas)
+    costo, unidades = sum(f["k"] for f in filas), sum(f["c"] for f in filas)
     t = Q(db, "SELECT COUNT(*) n, COALESCE(SUM(total),0) bruto FROM ventas WHERE estado='completada' "
               "AND fecha >= :d AND fecha < :h", **p)[0]
-    u = Q(db, "SELECT COALESCE(SUM(vi.cantidad),0) u FROM venta_items vi JOIN ventas v ON v.id=vi.venta_id "
-              "WHERE v.estado='completada' AND v.fecha >= :d AND v.fecha < :h", **p)[0]["u"]
-    sin_imp = r["ventas"] - r["imp"]
-    margen = sin_imp - r["costo"]
-    return {"ventas": int(r["ventas"]), "transacciones": t["n"],
+    sin_imp = ventas - imp
+    margen = sin_imp - costo
+    return {"ventas": int(ventas), "transacciones": t["n"],
             "ticket_promedio": round(t["bruto"] / t["n"]) if t["n"] else 0,
-            "unidades_por_ticket": round(u / t["n"], 1) if t["n"] else 0,
-            "margen": round(margen), "margen_pct": _pct(margen, sin_imp), "costo": round(r["costo"])}
+            "unidades_por_ticket": round(unidades / t["n"], 1) if t["n"] else 0,
+            "margen": round(margen), "margen_pct": _pct(margen, sin_imp), "costo": round(costo)}
 
 
 def _variacion(actual: float, previo: float) -> float | None:
@@ -87,7 +113,9 @@ def dashboard(db: Session, desde: date | None, hasta: date | None) -> dict:
     d, h = rango(desde, hasta, dias_defecto=30)
     dias = (h - d).days + 1
     dp, hp = d - timedelta(days=dias), d - timedelta(days=1)
-    actual, previo = _kpis(db, d, h), _kpis(db, dp, hp)
+    filas = por_producto(db, d, h)
+    nombres = nombres_producto(db)
+    actual, previo = _kpis(db, d, h, filas), _kpis(db, dp, hp)
     p = _par(d, h)
     for k in ("ventas", "transacciones", "ticket_promedio", "margen"):
         actual[f"{k}_var"] = _variacion(actual[k], previo[k])
@@ -107,14 +135,17 @@ def dashboard(db: Session, desde: date | None, hasta: date | None) -> dict:
     medios = Q(db, "SELECT mp.nombre medio, mp.tipo tipo, SUM(vp.monto) monto FROM venta_pagos vp "
                    "JOIN ventas v ON v.id = vp.venta_id JOIN medios_pago mp ON mp.id = vp.medio_pago_id "
                    "WHERE v.estado='completada' AND v.fecha >= :d AND v.fecha < :h GROUP BY mp.id ORDER BY monto DESC", **p)
-    top_ventas = Q(db, LINEAS + "SELECT pr.nombre, SUM(l.total) ventas, SUM(l.cantidad) unidades FROM lineas l "
-                                "JOIN productos pr ON pr.id = l.producto_id GROUP BY pr.id ORDER BY ventas DESC LIMIT 10", **p)
-    top_margen = Q(db, LINEAS + "SELECT pr.nombre, ROUND(SUM(l.total - l.impuesto - l.costo)) margen FROM lineas l "
-                                "JOIN productos pr ON pr.id = l.producto_id GROUP BY pr.id ORDER BY margen DESC LIMIT 10", **p)
-    top_cat = Q(db, LINEAS + "SELECT COALESCE(c.nombre,'Sin categoría') nombre, SUM(l.total) ventas, "
-                              "ROUND(SUM(l.total - l.impuesto - l.costo)) margen FROM lineas l "
-                              "JOIN productos pr ON pr.id = l.producto_id LEFT JOIN categorias c ON c.id = pr.categoria_id "
-                              "GROUP BY c.id ORDER BY ventas DESC LIMIT 8", **p)
+    def _nom(f):
+        return nombres.get(f["pid"], ("(producto eliminado)", "Sin categoría"))
+    top_ventas = [{"nombre": _nom(f)[0], "ventas": f["t"], "unidades": f["c"]} for f in sorted(filas, key=lambda f: f["t"], reverse=True)[:10]]
+    top_margen = [{"nombre": _nom(f)[0], "margen": round(f["t"] - f["i"] - f["k"])}
+                  for f in sorted(filas, key=lambda f: f["t"] - f["i"] - f["k"], reverse=True)[:10]]
+    por_cat: dict[str, dict] = {}
+    for f in filas:
+        g = por_cat.setdefault(_nom(f)[1], {"nombre": _nom(f)[1], "ventas": 0, "margen": 0.0})
+        g["ventas"] += f["t"]
+        g["margen"] += f["t"] - f["i"] - f["k"]
+    top_cat = [{**g, "margen": round(g["margen"])} for g in sorted(por_cat.values(), key=lambda g: g["ventas"], reverse=True)[:8]]
     stock = Q(db, "SELECT COALESCE(SUM(CASE WHEN stock_actual > 0 THEN stock_actual * costo_promedio END),0) valor, "
                   "SUM(CASE WHEN stock_actual = 0 AND stock_minimo > 0 THEN 1 ELSE 0 END) agotados, "
                   "SUM(CASE WHEN stock_actual > 0 AND stock_actual <= stock_minimo THEN 1 ELSE 0 END) bajo, "
@@ -173,14 +204,14 @@ def r_ventas_dia(db, d, h, **_):
 
 
 def _agrupado(db, d, h, por: str):
-    p = _par(d, h)
-    if por == "categoria":
-        sel, join, grupo, nom = "COALESCE(c.nombre,'Sin categoría')", "LEFT JOIN categorias c ON c.id = pr.categoria_id", "c.id", "categoria"
-    else:
-        sel, join, grupo, nom = "pr.nombre", "LEFT JOIN categorias c ON c.id = pr.categoria_id", "pr.id", "producto"
-    filas = Q(db, LINEAS + f"SELECT {sel} nombre, COALESCE(c.nombre,'Sin categoría') categoria, SUM(l.cantidad) unidades, "
-                           f"SUM(l.total) ventas, SUM(l.impuesto) imp, SUM(l.costo) costo FROM lineas l "
-                           f"JOIN productos pr ON pr.id = l.producto_id {join} GROUP BY {grupo} ORDER BY ventas DESC", **p)
+    nombres = nombres_producto(db)
+    grupos: dict[str, dict] = {}
+    for f in por_producto(db, d, h):
+        nombre, categoria = nombres.get(f["pid"], ("(producto eliminado)", "Sin categoría"))
+        clave = categoria if por == "categoria" else f["pid"]
+        g = grupos.setdefault(clave, {"nombre": categoria if por == "categoria" else nombre, "categoria": categoria, "unidades": 0, "ventas": 0, "imp": 0, "costo": 0.0})
+        g["unidades"] += f["c"]; g["ventas"] += f["t"]; g["imp"] += f["i"]; g["costo"] += f["k"]
+    filas = sorted(grupos.values(), key=lambda g: g["ventas"], reverse=True)
     total = sum(f["ventas"] for f in filas) or 0
     for f in filas:
         sin = f["ventas"] - f["imp"]
@@ -188,7 +219,7 @@ def _agrupado(db, d, h, por: str):
         f["margen_pct"] = _pct(sin - f["costo"], sin)
         f["costo"] = round(f["costo"])
         f["participacion"] = _pct(f["ventas"], total)
-    return filas, nom
+    return filas, "categoria" if por == "categoria" else "producto"
 
 
 COLS_AGRUPADO = [_col("unidades", "Unidades", "entero"), _col("ventas", "Ventas", "dinero"), _col("costo", "Costo", "dinero"),
@@ -308,19 +339,17 @@ def r_rotacion(db, d, h, agrupar="categoria", **_):
     inv_prom, ndias = _inventario_promedio(db, d, h)
     if not ndias:
         return _tabla("Rotación de inventario", [], [], nota="Aún no hay fotos diarias del inventario para este periodo.")
-    p = _par(d, h)
-    ventas = Q(db, LINEAS + "SELECT pr.id pid, pr.nombre nombre, COALESCE(c.nombre,'Sin categoría') categoria, "
-                            "SUM(l.costo) costo, SUM(l.total - l.impuesto) neto FROM lineas l JOIN productos pr ON pr.id = l.producto_id "
-                            "LEFT JOIN categorias c ON c.id = pr.categoria_id GROUP BY pr.id", **p)
-    cat_de = {r["id"]: r["categoria"] for r in Q(
-        db, "SELECT pr.id, COALESCE(c.nombre,'Sin categoría') categoria FROM productos pr LEFT JOIN categorias c ON c.id = pr.categoria_id")}
+    nombres = nombres_producto(db)
+    ventas = [{"pid": f["pid"], "nombre": nombres.get(f["pid"], ("(producto eliminado)", ""))[0], "categoria": nombres.get(f["pid"], ("", "Sin categoría"))[1],
+               "costo": f["k"], "neto": f["t"] - f["i"]} for f in por_producto(db, d, h)]
+    cat_de = {pid: v[1] for pid, v in nombres.items()}
     nom = {v["pid"]: v["nombre"] for v in ventas}
     grupos: dict[str, dict] = defaultdict(lambda: {"costo": 0.0, "neto": 0.0, "inv": 0.0})
     for v in ventas:
         k = v["nombre"] if agrupar == "producto" else (v["categoria"] if agrupar == "categoria" else "Todo el inventario")
         grupos[k]["costo"] += v["costo"]
         grupos[k]["neto"] += v["neto"]
-    nombres_prod = {r["id"]: r["nombre"] for r in Q(db, "SELECT id, nombre FROM productos")} if agrupar == "producto" else {}
+    nombres_prod = {pid: v[0] for pid, v in nombres.items()} if agrupar == "producto" else {}
     for pid, prom in inv_prom.items():
         k = nombres_prod.get(pid, nom.get(pid, "")) if agrupar == "producto" else (cat_de.get(pid, "Sin categoría") if agrupar == "categoria" else "Todo el inventario")
         if k:
@@ -381,15 +410,19 @@ def r_abc(db, d, h, base="ventas", **_):
 def r_sin_movimiento(db, d, h, dias=60, **_):
     dias = int(dias)
     corte = datetime.combine(hoy() - timedelta(days=dias), time.min).isoformat(sep=" ")
-    filas = Q(db, "SELECT pr.nombre nombre, COALESCE(c.nombre,'Sin categoría') categoria, pr.stock_actual stock, "
-                  "ROUND(pr.stock_actual * pr.costo_promedio) valor, "
-                  "(SELECT MAX(v.fecha) FROM venta_items vi JOIN ventas v ON v.id = vi.venta_id "
-                  "  WHERE vi.producto_id = pr.id AND v.estado='completada') ultima FROM productos pr "
-                  "LEFT JOIN categorias c ON c.id = pr.categoria_id WHERE pr.activo = 1 AND pr.stock_actual > 0 "
-                  "AND NOT EXISTS (SELECT 1 FROM venta_items vi JOIN ventas v ON v.id = vi.venta_id WHERE vi.producto_id = pr.id "
-                  "  AND v.estado='completada' AND v.fecha >= :corte) ORDER BY valor DESC", corte=corte)
-    for f in filas:
-        f["dias"] = (hoy() - date.fromisoformat(f["ultima"][:10])).days if f["ultima"] else None
+    recientes = {r["pid"] for r in Q(db, "SELECT DISTINCT vi.producto_id pid FROM venta_items vi JOIN ventas v ON v.id = vi.venta_id "
+                                         "WHERE v.estado = 'completada' AND v.fecha >= :c", c=corte)}
+    ultimas = {r["pid"]: r["fecha"] for r in Q(db, "SELECT m.producto_id pid, v.fecha fecha FROM (SELECT producto_id, MAX(venta_id) mv FROM venta_items "
+                                                   "GROUP BY producto_id) m JOIN ventas v ON v.id = m.mv")}
+    filas = []
+    for r in Q(db, "SELECT pr.id pid, pr.nombre nombre, COALESCE(c.nombre,'Sin categoría') categoria, pr.stock_actual stock, "
+                   "ROUND(pr.stock_actual * pr.costo_promedio) valor FROM productos pr LEFT JOIN categorias c ON c.id = pr.categoria_id "
+                   "WHERE pr.activo = 1 AND pr.stock_actual > 0 ORDER BY valor DESC"):
+        if r["pid"] in recientes:
+            continue
+        ultima = ultimas.get(r["pid"])
+        filas.append({"nombre": r["nombre"], "categoria": r["categoria"], "stock": r["stock"], "valor": r["valor"], "ultima": ultima,
+                      "dias": (hoy() - date.fromisoformat(ultima[:10])).days if ultima else None})
     return _tabla(f"Productos sin movimiento ({dias} días)", [_col("nombre", "Producto"), _col("categoria", "Categoría"),
                                                               _col("stock", "Stock", "entero"), _col("valor", "Dinero inmovilizado", "dinero"),
                                                               _col("ultima", "Última venta", "fechahora"), _col("dias", "Días sin vender", "entero")],
@@ -570,6 +603,19 @@ def generar(db: Session, slug: str, desde: date | None, hasta: date | None, para
     if not c:
         raise ErrorNegocio("Informe no encontrado.", 404)
     d, h = rango(desde, hasta)
-    r = c["fn"](db, d, h, **{k: v for k, v in params.items() if v not in (None, "")})
+    validos: dict = {}
+    for decl in c["params"]:  # solo los parámetros que el informe declara, con su tipo
+        v = params.get(decl["name"])
+        if v in (None, ""):
+            continue
+        if decl["tipo"] in ("numero", "producto"):
+            try:
+                v = int(v)
+            except (TypeError, ValueError):
+                raise ErrorNegocio(f"«{decl['label']}» debe ser un número.")
+        elif decl["tipo"] == "opcion" and v not in [o[0] for o in decl["opciones"]]:
+            raise ErrorNegocio(f"Opción no válida en «{decl['label']}».")
+        validos[decl["name"]] = v
+    r = c["fn"](db, d, h, **validos)
     r["slug"], r["desde"], r["hasta"] = slug, d.isoformat(), h.isoformat()
     return r

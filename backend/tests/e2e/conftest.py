@@ -54,10 +54,11 @@ def servidor(tmp_path_factory):
 def navegador():
     sync = pytest.importorskip("playwright.sync_api")
     ejecutable = _chromium()
-    if not ejecutable:
-        pytest.skip("No hay Chromium disponible (defina POS_CHROMIUM)")
     with sync.sync_playwright() as p:
-        b = p.chromium.launch(executable_path=ejecutable, args=["--no-sandbox"])
+        try:  # un Chromium del sistema, o el que instala `playwright install chromium`
+            b = p.chromium.launch(executable_path=ejecutable, args=["--no-sandbox"]) if ejecutable else p.chromium.launch(args=["--no-sandbox"])
+        except Exception as e:  # noqa: BLE001
+            pytest.skip(f"No hay un navegador disponible para las pruebas de interfaz: {str(e).splitlines()[0]}")
         yield b
         b.close()
 

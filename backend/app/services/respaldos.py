@@ -35,8 +35,8 @@ def _copiar_sqlite(origen: Path, destino: Path):
         src.close()
 
 
-def crear_respaldo(db: Session, tipo: str = "manual", usuario_id: int | None = None) -> dict:
-    """Crea `pos-AAAAMMDD-HHMMSS-<tipo>.db.gz` en la carpeta de respaldos y, si está configurada, en la externa."""
+def _copiar(carpeta_externa: str, tipo: str) -> tuple[str, Path, bool, str | None]:
+    """Hace la copia comprimida (y la copia externa). No toca la base con ninguna transacción de escritura."""
     ahora_ = ahora()
     nombre = f"pos-{ahora_:%Y%m%d-%H%M%S}-{tipo}.db.gz"
     destino = config.dir_respaldos() / nombre
@@ -46,22 +46,51 @@ def crear_respaldo(db: Session, tipo: str = "manual", usuario_id: int | None = N
         with open(plano, "rb") as f_in, gzip.open(destino, "wb", compresslevel=6) as f_out:
             shutil.copyfileobj(f_in, f_out)
     externa_ok, aviso = False, None
-    carpeta = cfg(db, "respaldo_carpeta_externa").strip()
-    if carpeta:
+    if carpeta_externa:
         try:
-            ext = Path(carpeta)
+            ext = Path(carpeta_externa)
             ext.mkdir(parents=True, exist_ok=True)
             shutil.copy2(destino, ext / nombre)
             externa_ok = True
         except OSError as e:
-            aviso = f"No se pudo copiar a la carpeta externa «{carpeta}»: {e.strerror or e}"
-    r = m.Respaldo(fecha=ahora_, archivo=nombre, tipo=tipo, tamano=destino.stat().st_size, copia_externa=externa_ok)
+            aviso = f"No se pudo copiar a la carpeta externa «{carpeta_externa}»: {e.strerror or e}"
+    return nombre, destino, externa_ok, aviso
+
+
+def _registrar(db: Session, nombre: str, destino: Path, tipo: str, externa_ok: bool, aviso: str | None, usuario_id: int | None) -> dict:
+    r = m.Respaldo(fecha=ahora(), archivo=nombre, tipo=tipo, tamano=destino.stat().st_size, copia_externa=externa_ok)
     db.add(r)
     db.flush()
-    _aplicar_retencion()
     if usuario_id:
         auditar(db, usuario_id, "RESPALDO", "respaldo", r.id, despues={"archivo": nombre, "externa": externa_ok})
     return {"id": r.id, "archivo": nombre, "tamano": r.tamano, "copia_externa": externa_ok, "aviso": aviso}
+
+
+def crear_respaldo_seguro(tipo: str = "manual", usuario_id: int | None = None) -> dict:
+    """Respaldo que NO bloquea las ventas: copia el archivo sin ninguna transacción de escritura abierta y
+    solo al final toma el candado un instante para registrarlo. Es el que usan la pantalla y las tareas."""
+    s = db_mod.nueva_sesion()
+    try:
+        carpeta = cfg(s, "respaldo_carpeta_externa").strip()
+    finally:
+        s.close()
+    nombre, destino, externa_ok, aviso = _copiar(carpeta, tipo)
+    w = db_mod.nueva_sesion(escritura=True)
+    try:
+        r = _registrar(w, nombre, destino, tipo, externa_ok, aviso, usuario_id)
+        w.commit()
+    finally:
+        w.close()
+    _aplicar_retencion()
+    return r
+
+
+def crear_respaldo(db: Session, tipo: str = "manual", usuario_id: int | None = None) -> dict:
+    """Variante para quien ya tiene una sesión de escritura abierta (restauración, carga de demostración)."""
+    nombre, destino, externa_ok, aviso = _copiar(cfg(db, "respaldo_carpeta_externa").strip(), tipo)
+    r = _registrar(db, nombre, destino, tipo, externa_ok, aviso, usuario_id)
+    _aplicar_retencion()
+    return r
 
 
 def _aplicar_retencion():

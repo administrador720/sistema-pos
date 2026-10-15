@@ -30,10 +30,8 @@ def listar(_: Admin, db: DB):
 
 
 @router.post("/respaldos")
-def crear(adm: Admin, db: DBW):
-    r = svc.crear_respaldo(db, "manual", adm.id)
-    db.commit()
-    return r
+def crear(adm: Admin):
+    return svc.crear_respaldo_seguro("manual", adm.id)
 
 
 @router.get("/respaldos/{archivo}/descargar")

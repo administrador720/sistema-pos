@@ -13,11 +13,24 @@ from ..services import productos as svc
 router = APIRouter(prefix="/api/productos")
 
 
+CAMPOS_DE_COSTO = ("costo_promedio", "margen_pct", "proveedor_id", "proveedor")
+
+
+def sin_costos(d: dict, usuario) -> dict:
+    """El costo, el margen y el proveedor son información del administrador: el cajero no los recibe."""
+    if usuario.rol != "admin":
+        for k in CAMPOS_DE_COSTO:
+            d.pop(k, None)
+    return d
+
+
 @router.get("")
-def listar(_: Usuario, db: DB, q: str = "", categoria_id: int | None = None, proveedor_id: int | None = None,
+def listar(u: Usuario, db: DB, q: str = "", categoria_id: int | None = None, proveedor_id: int | None = None,
            estado: str = "activos", bajo_minimo: bool = False, limite: int = Query(100, le=500), offset: int = 0):
-    return svc.buscar(db, q, categoria_id=categoria_id, proveedor_id=proveedor_id, estado=estado,
-                      bajo_minimo=bajo_minimo, limite=limite, offset=offset)
+    r = svc.buscar(db, q, categoria_id=categoria_id, proveedor_id=proveedor_id, estado=estado,
+                   bajo_minimo=bajo_minimo, limite=limite, offset=offset)
+    r["productos"] = [sin_costos(p, u) for p in r["productos"]]
+    return r
 
 
 @router.get("/codigo/{codigo}")
@@ -63,11 +76,11 @@ def precios_masivo(body: PreciosMasivoIn, adm: Admin, db: DBW):
 
 
 @router.get("/{pid}")
-def obtener(pid: int, _: Usuario, db: DB):
+def obtener(pid: int, u: Usuario, db: DB):
     p = db.scalars(select(m.Producto).where(m.Producto.id == pid).options(*svc._opciones())).first()
     if not p:
         raise ErrorNegocio("Producto no encontrado.", 404)
-    return svc.serializar(p)
+    return sin_costos(svc.serializar(p), u)
 
 
 @router.post("")

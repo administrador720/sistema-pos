@@ -11,7 +11,7 @@ import json
 from datetime import date, timedelta
 
 from sqlalchemy import func, select, text
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from .. import models as m
 from ..core import ErrorNegocio, ahora, auditar, cfg_int, hoy
@@ -151,18 +151,25 @@ def iniciar(db: Session, usuario: m.Usuario, conteo_id: int) -> m.Conteo:
         raise ErrorNegocio("Solo se puede iniciar un conteo en borrador.", 409)
     if db.scalar(select(func.count()).select_from(m.Conteo).where(m.Conteo.estado.in_(("en_conteo", "en_revision")))):
         raise ErrorNegocio("Ya hay un conteo en curso. Termínelo o cancélelo antes de iniciar otro.", 409)
-    productos = productos_en_alcance(db, c.tipo, json.loads(c.alcance or "{}"))
-    if not productos:
+    if c.tipo == "total":  # lo más común y lo más grande: se copia directo, sin cargar 30.000 objetos
+        db.execute(text("INSERT INTO conteo_items (conteo_id, producto_id, costo_unitario, no_contado, reconteo) "
+                        "SELECT :c, id, costo_promedio, 0, 0 FROM productos WHERE activo = 1"), {"c": c.id})
+        cantidad = db.scalar(select(func.count()).select_from(m.ConteoItem).where(m.ConteoItem.conteo_id == c.id)) or 0
+    else:
+        productos = productos_en_alcance(db, c.tipo, json.loads(c.alcance or "{}"))
+        cantidad = len(productos)
+        if productos:
+            db.execute(m.ConteoItem.__table__.insert(), [{"conteo_id": c.id, "producto_id": p.id, "costo_unitario": p.costo_promedio,
+                                                          "no_contado": False, "reconteo": False} for p in productos])
+    if not cantidad:
         raise ErrorNegocio("El alcance elegido no tiene productos.")
-    for p in productos:
-        db.add(m.ConteoItem(conteo_id=c.id, producto_id=p.id, costo_unitario=p.costo_promedio))
     c.estado, c.iniciado_en = "en_conteo", ahora()
     if c.programacion_id:
         prog = db.get(m.ProgramacionConteo, c.programacion_id)
         if prog:
             sig = siguiente_fecha(prog.frecuencia, prog.intervalo, hoy())
             prog.proxima_fecha, prog.activo = (sig, prog.activo) if sig else (prog.proxima_fecha, False)
-    auditar(db, usuario.id, "CONTEO_INICIADO", "conteo", c.id, despues={"productos": len(productos)})
+    auditar(db, usuario.id, "CONTEO_INICIADO", "conteo", c.id, despues={"productos": cantidad})
     db.flush()
     return c
 
@@ -321,17 +328,19 @@ def _recurrentes(db: Session, c: m.Conteo, faltantes: list[int]) -> dict[int, in
 def revision(db: Session, conteo_id: int) -> dict:
     c = _conteo(db, conteo_id)
     filas = []
-    for it, p in db.execute(select(m.ConteoItem, m.Producto).join(m.Producto, m.Producto.id == m.ConteoItem.producto_id)
-                            .where(m.ConteoItem.conteo_id == c.id)):
-        dif = it.diferencia
+    primer_codigo = select(m.CodigoBarra.codigo).where(m.CodigoBarra.producto_id == m.Producto.id).limit(1).scalar_subquery()
+    consulta = (select(m.ConteoItem.producto_id, m.ConteoItem.stock_teorico, m.ConteoItem.cantidad_contada, m.ConteoItem.diferencia,
+                       m.ConteoItem.costo_unitario, m.ConteoItem.no_contado, m.ConteoItem.reconteo, m.Producto.nombre, m.Producto.ubicacion,
+                       m.Producto.codigo_interno, primer_codigo.label("codigo"))
+                .join(m.Producto, m.Producto.id == m.ConteoItem.producto_id).where(m.ConteoItem.conteo_id == c.id))
+    for pid, teorico, contado, dif, costo, no_contado, reconteo_, nombre, ubicacion, cod_interno, codigo in db.execute(consulta):
         filas.append({
-            "producto_id": p.id, "nombre": p.nombre, "ubicacion": p.ubicacion,
-            "codigo": p.codigos[0].codigo if p.codigos else p.codigo_interno,
-            "stock_teorico": it.stock_teorico, "contado": it.cantidad_contada, "diferencia": dif,
-            "costo_unitario": round(it.costo_unitario, 2),
-            "valor_diferencia": round(dif * it.costo_unitario) if dif is not None else None,
-            "pct": round(dif * 100 / it.stock_teorico, 1) if dif is not None and it.stock_teorico else None,
-            "no_contado": it.no_contado, "reconteo": it.reconteo})
+            "producto_id": pid, "nombre": nombre, "ubicacion": ubicacion, "codigo": codigo or cod_interno,
+            "stock_teorico": teorico, "contado": contado, "diferencia": dif,
+            "costo_unitario": round(costo, 2),
+            "valor_diferencia": round(dif * costo) if dif is not None else None,
+            "pct": round(dif * 100 / teorico, 1) if dif is not None and teorico else None,
+            "no_contado": no_contado, "reconteo": reconteo_})
     contados = [f for f in filas if not f["no_contado"]]
     con_dif = [f for f in contados if f["diferencia"] != 0]
     faltantes = [f for f in con_dif if f["diferencia"] < 0]

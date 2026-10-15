@@ -332,9 +332,44 @@ const ModalVentasTurno = {
       <ModalDevolucion v-if="dev" :venta-id="dev" @cerrar="dev = null" @hecho="dev = null; cargar()"/></Modal>`,
 };
 
+
+// ───────────────────────── Retiros, ingresos y cajón sin venta (F12) ─────────────────────────
+const ModalMovimiento = {
+  emits: ['cerrar'],
+  setup(p, { emit }) {
+    const modo = ref('retiro'), monto = ref(null), motivo = ref(''), cargando = ref(false), inMonto = ref(null);
+    onMounted(() => inMonto.value?.focus());
+    watch(modo, () => nextTick(() => inMonto.value?.focus()));
+    const valido = computed(() => modo.value === 'cajon' ? motivo.value.trim().length > 0 : monto.value > 0 && motivo.value.trim().length > 0);
+    async function enviar() {
+      if (!valido.value) return; cargando.value = true;
+      try {
+        if (modo.value === 'cajon') {
+          const r = await api.post('/api/cajon/abrir', { motivo: motivo.value });
+          toast(r.ok ? 'Cajón abierto. Quedó registrado.' : r.mensaje, r.ok ? 'ok' : 'error');
+        } else {
+          await api.post(`/api/turnos/${store.turno.id}/movimientos`, { tipo: modo.value, monto: monto.value, motivo: motivo.value });
+          toast((modo.value === 'retiro' ? 'Retiro' : 'Ingreso') + ` de ${peso(monto.value)} registrado.`, 'ok');
+        }
+        emit('cerrar');
+      } catch (e) { errorToast(e); } finally { cargando.value = false; }
+    }
+    return { modo, monto, motivo, cargando, valido, enviar, inMonto, peso };
+  },
+  template: `<Modal titulo="Efectivo de la caja" ancho="sm" @cerrar="$emit('cerrar')"><div class="stack">
+      <div class="seg" style="align-self:stretch;display:grid;grid-template-columns:repeat(3,1fr)"><button :class="{ on: modo === 'retiro' }" @click="modo = 'retiro'">Retiro</button>
+        <button :class="{ on: modo === 'ingreso' }" @click="modo = 'ingreso'">Ingreso</button><button :class="{ on: modo === 'cajon' }" @click="modo = 'cajon'">Abrir cajón</button></div>
+      <p class="small muted" v-if="modo === 'retiro'">Dinero que sale de la caja: recogida de billetes, pago a un proveedor… Descuenta del efectivo esperado al cerrar.</p>
+      <p class="small muted" v-else-if="modo === 'ingreso'">Dinero que entra a la caja sin ser una venta: por ejemplo, reforzar la base.</p>
+      <p class="small muted" v-else>Abre el cajón sin una venta. Queda registrado con el motivo.</p>
+      <div class="field" v-if="modo !== 'cajon'"><label>Monto</label><InputDinero ref="inMonto" v-model="monto" grande placeholder="0" @enter="enviar"/></div>
+      <div class="field"><label>Motivo (obligatorio)</label><input class="input" v-model="motivo" @keydown.enter="enviar" :placeholder="modo === 'retiro' ? 'Ej.: recogida de billetes a la caja fuerte' : modo === 'ingreso' ? 'Ej.: refuerzo de base' : 'Ej.: cambio de billetes'"></div></div>
+      <template #pie><button class="btn" @click="$emit('cerrar')">Cancelar</button><button class="btn primary" :disabled="!valido || cargando" @click="enviar">{{ modo === 'cajon' ? 'Abrir cajón' : 'Registrar ' + modo }}</button></template></Modal>`,
+};
+
 // ───────────────────────── Vista principal ─────────────────────────
 export const Caja = {
-  components: { Cobro, Resultado, Buscador, ModalCantidad, ModalDescuento, ModalEtiqueta, ModalSuspendidas, ModalCrearRapido, ModalVentasTurno },
+  components: { Cobro, Resultado, Buscador, ModalCantidad, ModalDescuento, ModalEtiqueta, ModalSuspendidas, ModalCrearRapido, ModalVentasTurno, ModalMovimiento },
   setup() {
     const carrito = reactive({ items: [], descuentoGlobal: 0 });
     const scan = ref(''), sel = ref(-1), cantPend = ref(1), flash = ref(-1);
@@ -451,7 +486,7 @@ export const Caja = {
       if (document.querySelector('.overlay') || store.bloqueado) return;
       const k = e.key;
       const mapa = { F2: () => { buscarInicial.value = ''; dlg.value = 'buscar'; }, F3: abrirCantidad, F4: () => quitar(), F5: abrirDescuento, F6: abrirSuspender,
-        F7: abrirRetomar, F8: () => { dlg.value = 'ventas'; }, F9: () => abrirCobro('efectivo'), F10: () => abrirCobro('banco'), F11: () => abrirCobro('mixto'), Escape: cancelarVenta };
+        F7: abrirRetomar, F8: () => { dlg.value = 'ventas'; }, F12: () => { dlg.value = 'mov'; }, F9: () => abrirCobro('efectivo'), F10: () => abrirCobro('banco'), F11: () => abrirCobro('mixto'), Escape: cancelarVenta };
       if (mapa[k]) { e.preventDefault(); mapa[k](); return; }
       if (!scan.value) {
         if (k === 'ArrowDown') { e.preventDefault(); sel.value = Math.min(sel.value + 1, carrito.items.length - 1); }
@@ -527,6 +562,7 @@ export const Caja = {
             <button class="btn" @click="abrirRetomar"><Icono n="play"/> Retomar <span class="kbd">F7</span></button>
             <button class="btn" @click="dlg = 'ventas'"><Icono n="recibo"/> Ventas <span class="kbd">F8</span></button>
             <button class="btn" @click="cancelarVenta" :disabled="!carrito.items.length"><Icono n="x"/> Cancelar <span class="kbd">Esc</span></button>
+            <button class="btn" style="grid-column:span 2" @click="dlg = 'mov'"><Icono n="billetes"/> Retiro / ingreso / abrir cajón <span class="kbd">F12</span></button>
           </div>
         </aside>
       </div>
@@ -542,5 +578,6 @@ export const Caja = {
       <ModalSuspendidas v-if="dlg === 'suspendidas'" @cerrar="dlg = null" @retomar="retomar"/>
       <ModalCrearRapido v-if="dlg === 'rapido'" :codigo="codigoNuevo" @cerrar="dlg = null" @creado="creado"/>
       <ModalVentasTurno v-if="dlg === 'ventas'" @cerrar="dlg = null"/>
+      <ModalMovimiento v-if="dlg === 'mov'" @cerrar="dlg = null"/>
     </div>`,
 };

@@ -1,6 +1,9 @@
 # Plan — Sistema POS para Supermercado (local, una caja)
 
-> Versión 1 · Octubre 2026 · Documento de planeación (aún no hay código)
+> **Estado (v1.0):** las fases 0 a 6 de este plan están implementadas y probadas. Lo construido, y en qué se aparta de este plan,
+> está en [`arquitectura.md`](arquitectura.md). La fase 7 (futuro) sigue pendiente. El resto de este documento es el plan original.
+
+> Versión 1 · Octubre 2026 · Plan original
 
 ---
 

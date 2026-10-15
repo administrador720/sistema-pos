@@ -135,3 +135,21 @@ def test_retiros_de_caja_exigen_autorizacion_y_motivo(tienda):
     api.ok(mov(body={"tipo": "ingreso", "monto": 10000, "motivo": "refuerzo de base"}))
     z = api.ok(api.post(f"/api/turnos/{turno['id']}/cerrar", {"efectivo_contado": 60000, "banco_reportado": 0}))
     assert z["turno"]["efectivo_esperado"] == 60000 and z["turno"]["diferencia_efectivo"] == 0
+
+
+def test_el_cajero_no_ve_costos_ni_margenes(tienda):
+    t, api = tienda, tienda.api
+    adm = api.ok(api.get(f"/api/productos/{t.leche['id']}"))
+    assert adm["costo_promedio"] == 3000 and "margen_pct" in adm
+    api.login("carlos", "cajero1")
+    for r in (api.ok(api.get(f"/api/productos/{t.leche['id']}")), api.ok(api.get("/api/productos?q=Leche"))["productos"][0],
+              api.ok(api.get("/api/productos/codigo/7701"))):
+        assert "costo_promedio" not in r and "margen_pct" not in r and "proveedor" not in r
+        assert r["precio_venta"] == 4200 and r["stock_actual"] == 50     # lo que necesita para vender sí
+
+
+def test_parametros_de_informe_invalidos_no_rompen(tienda):
+    api = tienda.api
+    assert api.get("/api/informes/sin_movimiento?dias=abc").status_code == 400
+    assert api.get("/api/informes/ventas_dia?db=1&d=2&h=3&agrupar=x").status_code == 200      # desconocidos se ignoran
+    assert api.get("/api/informes/rentabilidad?agrupar=inventado").status_code == 400

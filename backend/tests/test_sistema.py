@@ -207,3 +207,51 @@ def test_corte_de_energia_despues_de_confirmar_conserva_la_venta_completa(tienda
     ventas, items, pagos, stock, consecutivo = _corte_de_energia(tienda, confirmar=True)
     assert (ventas, items, pagos, stock) == (1, 1, 1, 47)
     assert consecutivo[0] == "2"
+
+
+# ───────────────────────────── Planificador de tareas ─────────────────────────────
+def test_planificador_hace_el_respaldo_diario_y_las_fotos_una_sola_vez(tienda):
+    from sqlalchemy import func, select
+
+    from app import jobs
+    from app import models as m
+    api = tienda.api
+
+    def contar(tabla, **cond):
+        s = db_mod.nueva_sesion()
+        try:
+            q = select(func.count()).select_from(tabla)
+            for k, v in cond.items():
+                q = q.where(getattr(tabla, k) == v)
+            return s.scalar(q)
+        finally:
+            s.close()
+
+    jobs.tick()                      # nunca se había respaldado: lo hace de inmediato (el equipo pudo estar apagado)
+    assert contar(m.Respaldo, tipo="diario") == 1
+    assert len(list(config.dir_respaldos().glob("pos-*-diario.db.gz"))) == 1
+    assert contar(m.InventarioDiario) > 0                                   # foto del inventario de hoy
+    jobs.tick()                      # ya está hecho hoy: no se repite
+    assert contar(m.Respaldo, tipo="diario") == 1
+    assert api.ok(api.get("/api/respaldos"))["estado"]["ultimo"] is not None
+
+
+def test_el_respaldo_no_bloquea_las_ventas_mientras_copia(tienda, monkeypatch):
+    import time as reloj_real
+
+    from app.services import respaldos as resp
+    t, api = tienda, tienda.api
+    ef = t.medios["Efectivo"]
+    abrir_turno_cajero(t)
+    original = resp._copiar_sqlite
+    monkeypatch.setattr(resp, "_copiar_sqlite", lambda o, d: (reloj_real.sleep(1.5), original(o, d)))   # copia lenta (base grande)
+
+    hilo = threading.Thread(target=resp.crear_respaldo_seguro, args=("manual", None))
+    hilo.start()
+    reloj_real.sleep(0.3)            # el respaldo ya está copiando
+    inicio = reloj_real.perf_counter()
+    v = api.ok(api.post("/api/ventas", {"items": [{"producto_id": t.leche["id"], "cantidad": 1}], "pagos": [{"medio_pago_id": ef, "monto": 4200}]}))
+    demora = reloj_real.perf_counter() - inicio
+    hilo.join()
+    assert v["numero"] == "POS-000001"
+    assert demora < 1.0, f"la venta esperó {demora:.1f} s al respaldo"

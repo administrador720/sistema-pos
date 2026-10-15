@@ -145,3 +145,29 @@ def test_cajero_no_ve_menus_de_administracion_ni_puede_entrar(pagina):
     assert "Panel de control" not in menu and "Configuración" not in menu and "Productos" not in menu
     pg.goto(pg.url_base + "#/config"); pg.wait_for_timeout(500)
     assert "Configuración" not in pg.locator(".topbar h1").inner_text()      # lo devuelve a su pantalla
+
+
+def test_retiro_de_caja_pide_pin_del_administrador(pagina, servidor):
+    pg = pagina
+    entrar(pg, "luis", "luis1234")
+    pg.goto(servidor + "#/apertura"); pg.wait_for_selector("text=Abrir caja con")
+    pg.fill("input.money-lg", "50000")
+    pg.click("button:has-text('Abrir caja con')")
+    pg.wait_for_selector(".caja")
+
+    pg.keyboard.press("F12")
+    pg.wait_for_selector("text=Efectivo de la caja")
+    pg.fill(".modal input.money-lg", "20000")
+    pg.fill(".modal input:not(.money-lg)", "recogida de billetes")
+    pg.click(".modal button:has-text('Registrar retiro')")
+    pg.wait_for_selector("text=Autorización del administrador")          # el cajero necesita el PIN del administrador
+    pg.fill(".modal input[type=password]", "0000"); pg.keyboard.press("Enter")
+    pg.wait_for_selector("text=no es correcto")                            # PIN malo: vuelve a pedirlo
+    pg.fill(".modal input[type=password]", "1234"); pg.keyboard.press("Enter")
+    pg.wait_for_selector("text=registrado")
+
+    tk = token(servidor, "luis", "luis1234")                               # cierra el turno: esperado = 50.000 − 20.000
+    turno = api(servidor, "api/turnos/actual", tk)["turno"]
+    z = api(servidor, f"api/turnos/{turno['id']}/cerrar", tk, {"efectivo_contado": 30000, "banco_reportado": 0})
+    assert z["turno"]["efectivo_esperado"] == 30000 and z["turno"]["diferencia_efectivo"] == 0
+    assert [e for e in pg.errores if "403" not in e] == []      # los 403 son los esperados: pedir PIN y rechazar el PIN malo
