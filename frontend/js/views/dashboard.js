@@ -168,14 +168,15 @@ export const Dashboard = {
           <div class="card kpi"><span class="lbl">Rotación del inventario</span>
             <span class="val" v-if="rot && !rot.vacio && rot.rotacion">{{ decimal(rot.rotacion) }}<span class="muted small" style="font-weight:500"> veces</span></span><span class="val muted" v-else>{{ rot ? '—' : '…' }}</span>
             <span class="sub" v-if="rot && rot.dias_inventario">{{ decimal(rot.dias_inventario, 0) }} días de inventario · GMROI {{ decimal(rot.gmroi) }}</span><span class="sub" v-else-if="rot">Aún sin datos suficientes</span></div>
-          <div class="card kpi"><span class="lbl">Valor del inventario (a costo)</span><span class="val">{{ peso(d.inventario.valor) }}</span><span class="sub">{{ entero(d.inventario.productos) }} productos activos</span></div>
+          <div class="card kpi"><span class="lbl">Valor del inventario (a costo)</span><span class="val">{{ peso(d.inventario.valor) }}</span><span class="sub">{{ entero(d.inventario.productos) }} {{ d.inventario.productos === 1 ? 'producto activo' : 'productos activos' }}</span></div>
           <a class="card kpi" href="#/inventario" style="text-decoration:none;color:inherit"><span class="lbl">Alertas de stock</span>
             <span class="val" :class="d.inventario.agotados + d.inventario.bajo_minimo + d.inventario.negativos ? 'warn' : 'ok'">{{ d.inventario.agotados + d.inventario.bajo_minimo + d.inventario.negativos }}</span>
             <span class="sub">{{ d.inventario.agotados }} agotados · {{ d.inventario.bajo_minimo }} bajo mínimo · {{ d.inventario.negativos }} negativos</span></a>
         </div>
 
         <div class="dash-fila f21">
-          <Tarjeta titulo="Ventas por día" :sub="'Ventas netas diarias · ' + periodoTxt" :columnas="colsVentas" :filas="d.serie"><Grafico :opcion="opVentas"/></Tarjeta>
+          <Tarjeta titulo="Ventas por día" :sub="'Ventas netas diarias · ' + periodoTxt" :columnas="colsVentas" :filas="d.serie">
+            <Grafico v-if="d.serie.some(x => x.ventas > 0)" :opcion="opVentas"/><div v-else class="empty">Sin ventas en este periodo.</div></Tarjeta>
           <Tarjeta titulo="Cómo pagan los clientes" sub="Participación de cada medio de pago en las ventas" :columnas="colsMedios" :filas="medios">
             <div v-if="!medios.length" class="empty">Sin ventas en este periodo.</div>
             <template v-else>
@@ -186,17 +187,17 @@ export const Dashboard = {
         </div>
 
         <div class="dash-fila f12">
-          <Tarjeta titulo="¿Cuándo se vende más?" sub="Tiquetes por día de la semana y hora: sirve para programar turnos" :columnas="colsCalor" :filas="filasCalor"><Grafico :opcion="opCalor" alto="lg"/></Tarjeta>
+          <Tarjeta titulo="¿Cuándo se vende más?" sub="Tiquetes por día de la semana y hora: sirve para programar turnos" :columnas="colsCalor" :filas="filasCalor"><Grafico v-if="d.calor.length" :opcion="opCalor" alto="lg"/><div v-else class="empty">Sin ventas en este periodo.</div></Tarjeta>
           <Tarjeta :titulo="'Top 10 productos por ' + (metProd === 'ventas' ? 'ventas' : 'margen')" :sub="metProd === 'ventas' ? 'Lo que más dinero entra' : 'Lo que más utilidad deja'"
                    :columnas="metProd === 'ventas' ? colsProd : colsProdMargen" :filas="itemsProd">
             <div class="seg" style="align-self:flex-start;margin-bottom:6px"><button :class="{ on: metProd === 'ventas' }" @click="metProd = 'ventas'">Ventas</button><button :class="{ on: metProd === 'margen' }" @click="metProd = 'margen'">Margen</button></div>
-            <div :style="altoBarras(itemsProd.length)"><Grafico :opcion="opProd" :style="{ height: '100%' }"/></div>
+            <div v-if="itemsProd.length" :style="altoBarras(itemsProd.length)"><Grafico :opcion="opProd" :style="{ height: '100%' }"/></div><div v-else class="empty">Sin ventas en este periodo.</div>
           </Tarjeta>
         </div>
 
         <div class="dash-fila f3">
           <Tarjeta titulo="Ventas por categoría" sub="Qué secciones sostienen el negocio" :columnas="colsCat" :filas="d.top_categorias">
-            <div :style="altoBarras((d.top_categorias || []).length)"><Grafico :opcion="opCat" :style="{ height: '100%' }"/></div>
+            <div v-if="(d.top_categorias || []).length" :style="altoBarras(d.top_categorias.length)"><Grafico :opcion="opCat" :style="{ height: '100%' }"/></div><div v-else class="empty">Sin ventas en este periodo.</div>
           </Tarjeta>
 
           <div class="card stack">

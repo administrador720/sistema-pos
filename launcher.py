@@ -87,9 +87,13 @@ def abrir_ventana(url: str, pantalla_completa: bool) -> bool:
         webview.settings["ALLOW_DOWNLOADS"] = True
     except Exception:  # noqa: BLE001
         pass
-    webview.create_window(config.NOMBRE_APP, url + "?escritorio=1", width=1366, height=820, min_size=(1100, 700),
-                          fullscreen=pantalla_completa, text_select=False)
-    webview.start()          # bloquea hasta que se cierra la ventana
+    try:
+        webview.create_window(config.NOMBRE_APP, url + "?escritorio=1", width=1366, height=820, min_size=(1100, 700),
+                              fullscreen=pantalla_completa, text_select=False)
+        webview.start()      # bloquea hasta que se cierra la ventana
+    except Exception as e:  # noqa: BLE001 - sin motor gráfico (WebView2/GTK/Qt) no se puede abrir la ventana nativa
+        log.warning("No se pudo abrir la ventana de escritorio (%s): se usará el navegador", e)
+        return False
     return True
 
 
