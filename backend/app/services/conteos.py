@@ -14,8 +14,9 @@ from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session, selectinload
 
 from .. import models as m
-from ..core import ErrorNegocio, ahora, auditar, cfg_int, hoy
+from ..core import ErrorNegocio, ahora, auditar, cant, cfg_int, hoy
 from . import inventario as inv
+from . import unidades as unid
 
 TIPOS = ("total", "parcial", "ciclico")
 FRECUENCIAS = ("una_vez", "dias", "semanal", "quincenal", "mensual")
@@ -175,15 +176,15 @@ def iniciar(db: Session, usuario: m.Usuario, conteo_id: int) -> m.Conteo:
 
 
 def capturar(db: Session, usuario: m.Usuario, conteo_id: int, *, codigo: str | None = None,
-             producto_id: int | None = None, cantidad: int, ubicacion: str | None = None) -> dict:
+             producto_id: int | None = None, cantidad: int | float, ubicacion: str | None = None) -> dict:
     c = _conteo(db, conteo_id)
     if c.estado != "en_conteo":
         raise ErrorNegocio("El conteo no está recibiendo capturas.", 409)
-    unidades = 1
+    por_codigo = 1
     if codigo:
         cb = db.get(m.CodigoBarra, codigo.strip())
         if cb:
-            producto_id, unidades = cb.producto_id, cb.unidades_por_codigo
+            producto_id, por_codigo = cb.producto_id, cb.unidades_por_codigo
         else:
             p = db.scalars(select(m.Producto).where(m.Producto.codigo_interno == codigo.strip())).first()
             producto_id = p.id if p else None
@@ -191,20 +192,21 @@ def capturar(db: Session, usuario: m.Usuario, conteo_id: int, *, codigo: str | N
             raise ErrorNegocio(f"El código {codigo} no existe en el catálogo.", 404, "CODIGO_NO_EXISTE")
     if not producto_id:
         raise ErrorNegocio("Indique el producto.")
-    if int(cantidad) < 0:
-        raise ErrorNegocio("La cantidad no puede ser negativa.")
-    item = db.get(m.ConteoItem, (c.id, producto_id))
     p = db.get(m.Producto, producto_id)
+    if not p:
+        raise ErrorNegocio("Producto no encontrado.", 404)
+    cantidad = unid.normalizar(p, cantidad, permitir_cero=True)  # contar «0» es válido: el estante está vacío
+    item = db.get(m.ConteoItem, (c.id, producto_id))
     if not item:
         raise ErrorNegocio(f"«{p.nombre}» no hace parte del alcance de este conteo.", 409, "FUERA_DE_ALCANCE")
-    cap = m.ConteoCaptura(conteo_id=c.id, producto_id=producto_id, cantidad=int(cantidad) * unidades,
+    cap = m.ConteoCaptura(conteo_id=c.id, producto_id=producto_id, cantidad=cant(cantidad * por_codigo),
                           ubicacion=(ubicacion or "").strip() or p.ubicacion, usuario_id=usuario.id, capturado_en=ahora())
     db.add(cap)
     db.flush()
     # respuesta ciega: nada del stock del sistema
-    total = db.scalar(select(func.coalesce(func.sum(m.ConteoCaptura.cantidad), 0)).where(
+    total = cant(db.scalar(select(func.coalesce(func.sum(m.ConteoCaptura.cantidad), 0)).where(
         m.ConteoCaptura.conteo_id == c.id, m.ConteoCaptura.producto_id == producto_id,
-        m.ConteoCaptura.reemplazada.is_(False))) or 0
+        m.ConteoCaptura.reemplazada.is_(False))) or 0)
     return {"captura_id": cap.id, "producto_id": p.id, "nombre": p.nombre, "cantidad": cap.cantidad,
             "total_contado": total}
 
@@ -256,9 +258,9 @@ def _calcular_items(db: Session, c: m.Conteo):
         if ult is None:
             it.no_contado, it.cantidad_contada, it.stock_teorico, it.diferencia = True, None, stock, None
         else:
-            it.no_contado, it.cantidad_contada = False, int(suma)
-            it.stock_teorico = stock - int(despues)
-            it.diferencia = it.cantidad_contada - it.stock_teorico
+            it.no_contado, it.cantidad_contada = False, cant(suma)
+            it.stock_teorico = cant(stock - despues)
+            it.diferencia = cant(it.cantidad_contada - it.stock_teorico)
     db.flush()
 
 
@@ -331,11 +333,11 @@ def revision(db: Session, conteo_id: int) -> dict:
     primer_codigo = select(m.CodigoBarra.codigo).where(m.CodigoBarra.producto_id == m.Producto.id).limit(1).scalar_subquery()
     consulta = (select(m.ConteoItem.producto_id, m.ConteoItem.stock_teorico, m.ConteoItem.cantidad_contada, m.ConteoItem.diferencia,
                        m.ConteoItem.costo_unitario, m.ConteoItem.no_contado, m.ConteoItem.reconteo, m.Producto.nombre, m.Producto.ubicacion,
-                       m.Producto.codigo_interno, primer_codigo.label("codigo"))
+                       m.Producto.codigo_interno, primer_codigo.label("codigo"), m.Producto.unidad)
                 .join(m.Producto, m.Producto.id == m.ConteoItem.producto_id).where(m.ConteoItem.conteo_id == c.id))
-    for pid, teorico, contado, dif, costo, no_contado, reconteo_, nombre, ubicacion, cod_interno, codigo in db.execute(consulta):
+    for pid, teorico, contado, dif, costo, no_contado, reconteo_, nombre, ubicacion, cod_interno, codigo, unidad in db.execute(consulta):
         filas.append({
-            "producto_id": pid, "nombre": nombre, "ubicacion": ubicacion, "codigo": codigo or cod_interno,
+            "producto_id": pid, "nombre": nombre, "unidad": unidad, "ubicacion": ubicacion, "codigo": codigo or cod_interno,
             "stock_teorico": teorico, "contado": contado, "diferencia": dif,
             "costo_unitario": round(costo, 2),
             "valor_diferencia": round(dif * costo) if dif is not None else None,
@@ -376,7 +378,7 @@ def aplicar(db: Session, usuario: m.Usuario, conteo_id: int, asumir_cero: bool =
         if it.no_contado:
             if not asumir_cero:
                 continue
-            it.stock_teorico, it.cantidad_contada, it.diferencia = p.stock_actual, 0, -p.stock_actual
+            it.stock_teorico, it.cantidad_contada, it.diferencia = p.stock_actual, 0, cant(-p.stock_actual)
         contados += 1
         it.costo_unitario = p.costo_promedio
         if it.diferencia:
@@ -406,8 +408,8 @@ def listar(db: Session, limite: int = 100) -> list[dict]:
 
 def informe_tabla(db: Session, conteo_id: int) -> dict:
     r = revision(db, conteo_id)
-    cols = [("nombre", "Producto", "texto"), ("ubicacion", "Ubicación", "texto"), ("stock_teorico", "Stock sistema", "entero"),
-            ("contado", "Contado", "entero"), ("diferencia", "Diferencia", "entero"),
+    cols = [("nombre", "Producto", "texto"), ("ubicacion", "Ubicación", "texto"), ("stock_teorico", "Stock sistema", "cantidad"),
+            ("contado", "Contado", "cantidad"), ("diferencia", "Diferencia", "cantidad"),
             ("valor_diferencia", "Valor dif. (costo)", "dinero"), ("pct", "% dif.", "porcentaje"),
             ("racha_faltantes", "Faltante seguido (conteos)", "entero")]
     return {"titulo": f"Conteo: {r['conteo']['nombre']}", "columnas": [{"key": k, "titulo": t, "tipo": tp} for k, t, tp in cols],

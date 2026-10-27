@@ -84,7 +84,16 @@ def _m1_indice_ultima_venta(con):
     con.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_venta_items_prod_venta ON venta_items (producto_id, venta_id)")
 
 
-MIGRACIONES: list = [_m1_indice_ultima_venta]
+def _m2_productos_por_peso(con):
+    """Productos por peso (kg) y botones de acceso rápido. Las cantidades ya aceptan decimales sin cambios."""
+    cols = {f[1] for f in con.exec_driver_sql("PRAGMA table_info(productos)")}
+    if "unidad" not in cols:
+        con.exec_driver_sql("ALTER TABLE productos ADD COLUMN unidad VARCHAR(3) NOT NULL DEFAULT 'u'")
+    if "rapido" not in cols:
+        con.exec_driver_sql("ALTER TABLE productos ADD COLUMN rapido BOOLEAN NOT NULL DEFAULT 0")
+
+
+MIGRACIONES: list = [_m1_indice_ultima_venta, _m2_productos_por_peso]
 
 
 def inicializar():

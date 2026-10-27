@@ -1,7 +1,8 @@
 """Modelo de datos (SQLite).
 
 Convenciones: precios y montos de venta en pesos como INTEGER; costos como REAL
-(promedios ponderados); cantidades en unidades INTEGER; fechas locales sin zona horaria.
+(promedios ponderados); cantidades con el tipo `Cantidad` (unidades enteras o kilos con hasta 3 decimales);
+fechas locales sin zona horaria.
 """
 from __future__ import annotations
 
@@ -10,10 +11,30 @@ from datetime import date, datetime
 from sqlalchemy import (Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String,
                         Text, UniqueConstraint)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.types import TypeDecorator
 
 
 class Base(DeclarativeBase):
     pass
+
+
+def _norm_cant(v):
+    r = round(float(v), 3)
+    return int(r) if r == int(r) else r
+
+
+class Cantidad(TypeDecorator):
+    """Cantidad de producto: 5 unidades o 1,250 kg. En SQLite la columna sigue siendo INTEGER (guarda enteros
+    como enteros y decimales como reales), así que las bases de datos anteriores no necesitan migración.
+    Se redondea a 3 decimales (gramos) al guardar y al leer."""
+    impl = Integer
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        return None if value is None else _norm_cant(value)
+
+    def process_result_value(self, value, dialect):
+        return None if value is None else _norm_cant(value)
 
 
 # ───────────────────────────── Usuarios y configuración ─────────────────────────────
@@ -105,9 +126,11 @@ class Producto(Base):
     impuesto_id: Mapped[int | None] = mapped_column(ForeignKey("impuestos.id"))
     costo_promedio: Mapped[float] = mapped_column(Float, default=0)
     precio_venta: Mapped[int] = mapped_column(Integer, default=0)
-    stock_actual: Mapped[int] = mapped_column(Integer, default=0)
-    stock_minimo: Mapped[int] = mapped_column(Integer, default=0)
-    stock_maximo: Mapped[int] = mapped_column(Integer, default=0)
+    unidad: Mapped[str] = mapped_column(String(3), default="u", server_default="u")  # u (unidad) | kg (por peso)
+    rapido: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")  # botón de acceso rápido en caja
+    stock_actual: Mapped[float] = mapped_column(Cantidad, default=0)
+    stock_minimo: Mapped[float] = mapped_column(Cantidad, default=0)
+    stock_maximo: Mapped[float] = mapped_column(Cantidad, default=0)
     ubicacion: Mapped[str | None] = mapped_column(String(60), index=True)
     activo: Mapped[bool] = mapped_column(Boolean, default=True)
     creado_en: Mapped[datetime] = mapped_column(DateTime)
@@ -227,7 +250,7 @@ class VentaItem(Base):
     venta_id: Mapped[int] = mapped_column(ForeignKey("ventas.id"), index=True)
     producto_id: Mapped[int] = mapped_column(ForeignKey("productos.id"), index=True)
     descripcion: Mapped[str] = mapped_column(String(200))
-    cantidad: Mapped[int] = mapped_column(Integer)
+    cantidad: Mapped[float] = mapped_column(Cantidad)
     precio_unitario: Mapped[int] = mapped_column(Integer)
     descuento: Mapped[int] = mapped_column(Integer, default=0)
     impuesto_id: Mapped[int | None] = mapped_column(ForeignKey("impuestos.id"))
@@ -287,7 +310,7 @@ class DevolucionItem(Base):
     devolucion_id: Mapped[int] = mapped_column(ForeignKey("devoluciones.id"), index=True)
     venta_item_id: Mapped[int] = mapped_column(ForeignKey("venta_items.id"), index=True)
     producto_id: Mapped[int] = mapped_column(ForeignKey("productos.id"), index=True)
-    cantidad: Mapped[int] = mapped_column(Integer)
+    cantidad: Mapped[float] = mapped_column(Cantidad)
     total: Mapped[int] = mapped_column(Integer)
     valor_impuesto: Mapped[int] = mapped_column(Integer, default=0)
     costo_unitario: Mapped[float] = mapped_column(Float, default=0)
@@ -314,7 +337,7 @@ class CompraItem(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     compra_id: Mapped[int] = mapped_column(ForeignKey("compras.id"), index=True)
     producto_id: Mapped[int] = mapped_column(ForeignKey("productos.id"), index=True)
-    cantidad: Mapped[int] = mapped_column(Integer)
+    cantidad: Mapped[float] = mapped_column(Cantidad)
     costo_unitario: Mapped[float] = mapped_column(Float)
     compra: Mapped[Compra] = relationship(back_populates="items")
     producto: Mapped[Producto] = relationship()
@@ -326,9 +349,9 @@ class MovimientoInventario(Base):
     producto_id: Mapped[int] = mapped_column(ForeignKey("productos.id"))
     fecha: Mapped[datetime] = mapped_column(DateTime)
     tipo: Mapped[str] = mapped_column(String(20))
-    cantidad: Mapped[int] = mapped_column(Integer)  # con signo
+    cantidad: Mapped[float] = mapped_column(Cantidad)  # con signo
     costo_unitario: Mapped[float] = mapped_column(Float, default=0)
-    stock_resultante: Mapped[int] = mapped_column(Integer)
+    stock_resultante: Mapped[float] = mapped_column(Cantidad)
     referencia_tipo: Mapped[str | None] = mapped_column(String(20))
     referencia_id: Mapped[int | None] = mapped_column(Integer)
     usuario_id: Mapped[int | None] = mapped_column(ForeignKey("usuarios.id"))
@@ -344,7 +367,7 @@ class InventarioDiario(Base):
     __tablename__ = "inventario_diario"
     fecha: Mapped[date] = mapped_column(Date, primary_key=True)
     producto_id: Mapped[int] = mapped_column(ForeignKey("productos.id"), primary_key=True)
-    stock: Mapped[int] = mapped_column(Integer)
+    stock: Mapped[float] = mapped_column(Cantidad)
     costo_promedio: Mapped[float] = mapped_column(Float)
 
 
@@ -384,9 +407,9 @@ class ConteoItem(Base):
     __tablename__ = "conteo_items"
     conteo_id: Mapped[int] = mapped_column(ForeignKey("conteos.id"), primary_key=True)
     producto_id: Mapped[int] = mapped_column(ForeignKey("productos.id"), primary_key=True)
-    stock_teorico: Mapped[int | None] = mapped_column(Integer)
-    cantidad_contada: Mapped[int | None] = mapped_column(Integer)
-    diferencia: Mapped[int | None] = mapped_column(Integer)
+    stock_teorico: Mapped[float | None] = mapped_column(Cantidad)
+    cantidad_contada: Mapped[float | None] = mapped_column(Cantidad)
+    diferencia: Mapped[float | None] = mapped_column(Cantidad)
     costo_unitario: Mapped[float] = mapped_column(Float, default=0)
     no_contado: Mapped[bool] = mapped_column(Boolean, default=False)
     reconteo: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -399,7 +422,7 @@ class ConteoCaptura(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     conteo_id: Mapped[int] = mapped_column(ForeignKey("conteos.id"), index=True)
     producto_id: Mapped[int] = mapped_column(ForeignKey("productos.id"), index=True)
-    cantidad: Mapped[int] = mapped_column(Integer)
+    cantidad: Mapped[float] = mapped_column(Cantidad)
     ubicacion: Mapped[str | None] = mapped_column(String(60))
     usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"))
     capturado_en: Mapped[datetime] = mapped_column(DateTime)

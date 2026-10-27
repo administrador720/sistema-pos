@@ -137,7 +137,7 @@ export const Dashboard = {
     const estadoDif = x => x === 0 ? { t: 'Cuadra', c: 'ok', i: 'check' } : x < 0 ? { t: 'Faltante', c: 'danger', i: 'alerta' } : { t: 'Sobrante', c: 'warn', i: 'info' };
     return { PERIODOS, per, custom, d, rot, cargando, metProd, elegir, cargar, opVentas, colsVentas, opCalor, filasCalor, colsCalor, opProd, opCat, itemsProd, medios, colsMedios, k, periodoTxt,
       delta, estadoDif, altoBarras, store, peso, entero, porcentaje, decimal, fecha, fechaHora, formatear, ir: h => { location.hash = h; },
-      colsProd: [{ key: 'nombre', titulo: 'Producto' }, { key: 'ventas', titulo: 'Ventas', tipo: 'dinero', num: true }, { key: 'unidades', titulo: 'Unidades', tipo: 'entero', num: true }],
+      colsProd: [{ key: 'nombre', titulo: 'Producto' }, { key: 'ventas', titulo: 'Ventas', tipo: 'dinero', num: true }, { key: 'unidades', titulo: 'Unid. / kg', tipo: 'cantidad', num: true }],
       colsProdMargen: [{ key: 'nombre', titulo: 'Producto' }, { key: 'margen', titulo: 'Margen', tipo: 'dinero', num: true }],
       colsCat: [{ key: 'nombre', titulo: 'Categoría' }, { key: 'ventas', titulo: 'Ventas', tipo: 'dinero', num: true }, { key: 'margen', titulo: 'Margen', tipo: 'dinero', num: true }] };
   },

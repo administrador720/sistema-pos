@@ -29,7 +29,7 @@ información **localmente** (sin depender de internet). Incluye:
 | Facturación electrónica | **DIAN después**. Por ahora tiquete interno; el diseño queda preparado (consecutivos, datos del cliente, estado de envío). |
 | Hardware | **Lector de código de barras + cajón monedero**. Sin impresora por ahora (ver nota en §9). |
 | Tecnología | **Python (FastAPI) + SQLite + interfaz web (Vue 3)** dentro de una ventana de escritorio. |
-| Productos por peso | Fuera del alcance inicial (solo unidades). |
+| Productos por peso | Implementado en la versión 1.1: kilos con gramos, precio por kilo, código corto (PLU), botones rápidos. La balanza se lee a mano; conectarla por cable queda para después. |
 
 ---
 
@@ -508,7 +508,7 @@ Estimaciones **orientativas** para un desarrollador a tiempo completo.
 | **4. Conteos** | Programación, recordatorios, captura con escáner, conteo ciego, inconsistencias, reconteo, aprobación y ajustes | Un conteo parcial real termina con ajustes aplicados y reporte | 1,5 semanas |
 | **5. Dashboard e informes** | Foto diaria de inventario, dashboard, todos los informes de §3.8, exportación Excel/PDF | El administrador ve rotación, ABC, márgenes y sugerido de compras | 2 semanas |
 | **6. Control y salida en vivo** | Anulaciones, devoluciones, auditoría, respaldos externos y restauración, instalador, pruebas | Instalador probado en el PC de la tienda | 1,5 semanas |
-| **7. Futuro** | DIAN, impresora térmica, productos por peso, varias cajas, clientes/fidelización, crédito ("fiado"), lotes y vencimientos, promociones | — | — |
+| **7. Futuro** | DIAN, impresora térmica, balanza conectada, varias cajas, clientes/fidelización, crédito ("fiado"), lotes y vencimientos, promociones | — | — |
 
 **MVP utilizable**: Fases 0 + 1 + 2 (≈ 4 semanas).
 

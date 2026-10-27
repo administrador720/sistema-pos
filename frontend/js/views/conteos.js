@@ -1,7 +1,7 @@
 // Conteos de inventario físico: programación, captura ciega, revisión de inconsistencias y ajustes
 import { api, query } from '../api.js';
 import { store, esAdmin, errorToast, toast, confirmar, exportarArchivo, pedirTexto } from '../store.js';
-import { peso, entero, fecha, fechaHora, porcentaje, isoHoy, beep, aFecha } from '../util.js';
+import { peso, entero, fecha, fechaHora, porcentaje, isoHoy, beep, aFecha, cantidadTxt, conUnidad } from '../util.js';
 
 const { ref, reactive, computed, onMounted, nextTick, watch } = Vue;
 
@@ -121,14 +121,14 @@ const Captura = {
     }
     async function alEscanear() {
       let t = scan.value.trim(); scan.value = ''; if (!t) return;
-      let m = t.match(/^(\d{1,4})\s*[*xX]\s*(.*)$/), cant = qty.value || 1;
-      if (m) { cant = parseInt(m[1], 10); t = m[2]; if (!t) { qty.value = cant; return; } }
-      if (preguntar.value) {
-        try {
-          const prod = await api.get('/api/productos/codigo/' + encodeURIComponent(t));
-          pend.value = { codigo: t, nombre: prod.nombre }; nextTick(() => inQty.value?.focus());
-        } catch (e) { beep('error'); msgError.value = e.message; }
-        return;
+      let m = t.match(/^(\d{1,4}(?:[.,]\d{1,3})?)\s*[*xX]\s*(.*)$/), cant = qty.value || 1;
+      if (m) { cant = parseFloat(m[1].replace(',', '.')); t = m[2]; if (!t) { qty.value = cant; return; } }
+      // Se consulta el producto: si es por peso siempre se pregunta cuántos kilos hay (no se puede suponer «1»)
+      let prod = null;
+      try { prod = await api.get('/api/productos/codigo/' + encodeURIComponent(t)); } catch (e) { beep('error'); msgError.value = e.message; return; }
+      if (preguntar.value || prod.unidad === 'kg') {
+        pend.value = { codigo: t, nombre: prod.nombre, unidad: prod.unidad }; if (prod.unidad === 'kg') qty.value = null;
+        nextTick(() => inQty.value?.focus()); return;
       }
       registrar({ codigo: t, cantidad: cant });
     }
@@ -136,7 +136,7 @@ const Captura = {
     async function quitar(c) { try { await api.del(`/api/conteos/${p.conteo.id}/capturas/${c.id}`); toast('Captura eliminada.', 'ok', 1800); cargar(); } catch (e) { errorToast(e); } }
     onMounted(() => { cargar(); nextTick(() => inScan.value?.focus()); });
     const pct = computed(() => prog.value && prog.value.productos ? Math.round(prog.value.contados * 100 / prog.value.productos) : 0);
-    return { scan, qty, ubic, preguntar, pend, capturas, ultima, prog, inScan, inQty, ocupado, msgError, pct, alEscanear, confirmarCantidad, quitar, entero, fechaHora };
+    return { scan, qty, ubic, preguntar, pend, capturas, ultima, prog, inScan, inQty, ocupado, msgError, pct, alEscanear, confirmarCantidad, quitar, entero, fechaHora, cantidadTxt };
   },
   template: `
     <div class="grid" style="grid-template-columns:minmax(0,1fr) 420px;align-items:start">
@@ -144,13 +144,13 @@ const Captura = {
         <div class="card stack">
           <div class="row between"><h2>Contar</h2><label class="check small"><input type="checkbox" v-model="preguntar"> Preguntar la cantidad después de escanear</label></div>
           <div class="scan"><Icono n="barras"/><input ref="inScan" class="input lg" v-model="scan" @keydown.enter.prevent="alEscanear" placeholder="Escanee cada producto (o use 12* y escanee para contar 12)" autocomplete="off" :disabled="ocupado || !!pend">
-            <span class="qty chip accent" v-if="qty > 1 && !pend">× {{ qty }}</span></div>
+            <span class="qty chip accent" v-if="qty > 1 && !pend">× {{ cantidadTxt(qty) }}</span></div>
           <div v-if="pend" class="card soft stack sm"><b style="font-size:18px">{{ pend.nombre }}</b>
-            <div class="row"><InputDinero ref="inQty" v-model="qty" grande style="flex:1" @enter="confirmarCantidad"/><button class="btn primary lg" @click="confirmarCantidad">Guardar</button><button class="btn lg" @click="pend = null; qty = 1">Cancelar</button></div></div>
+            <div class="row"><InputPeso v-if="pend.unidad === 'kg'" ref="inQty" v-model="qty" grande placeholder="kilos" style="flex:1" @enter="confirmarCantidad"/><InputDinero v-else ref="inQty" v-model="qty" grande style="flex:1" @enter="confirmarCantidad"/><button class="btn primary lg" @click="confirmarCantidad">Guardar</button><button class="btn lg" @click="pend = null; qty = 1">Cancelar</button></div></div>
           <div class="grid c2"><div class="field"><label>Ubicación / pasillo (opcional)</label><input class="input" v-model="ubic" placeholder="Ej.: bodega"></div>
             <div class="field"><label>Cantidad por escaneo</label><InputDinero v-model="qty"/></div></div>
           <div class="alert danger" v-if="msgError"><Icono n="alerta"/>{{ msgError }}</div>
-          <div class="alert ok" v-else-if="ultima"><Icono n="check"/><div><b>{{ ultima.nombre }}</b> · +{{ ultima.cantidad }} (llevas {{ ultima.total_contado }} de este producto)</div></div>
+          <div class="alert ok" v-else-if="ultima"><Icono n="check"/><div><b>{{ ultima.nombre }}</b> · +{{ cantidadTxt(ultima.cantidad) }} (llevas {{ cantidadTxt(ultima.total_contado) }} de este producto)</div></div>
           <p class="hint">El sistema <b>no muestra cuántas unidades debería haber</b>: así el conteo es honesto. Si cuenta el mismo producto en otra góndola, las cantidades se suman.</p>
         </div>
       </div>
@@ -159,7 +159,7 @@ const Captura = {
           <div class="progress"><i :style="{ width: pct + '%' }"></i></div><div class="xs muted">{{ prog ? prog.pendientes : 0 }} productos aún sin contar</div></div>
         <div class="card pad0"><div style="padding:14px 18px"><h3>Últimas capturas</h3></div>
           <div class="table-wrap" style="max-height:46vh"><table class="t compact"><tbody>
-            <tr v-for="c in capturas" :key="c.id"><td><b>{{ c.nombre }}</b><div class="xs muted">{{ fechaHora(c.capturado_en) }}{{ c.ubicacion ? ' · ' + c.ubicacion : '' }}</div></td><td class="num"><b>+{{ c.cantidad }}</b></td>
+            <tr v-for="c in capturas" :key="c.id"><td><b>{{ c.nombre }}</b><div class="xs muted">{{ fechaHora(c.capturado_en) }}{{ c.ubicacion ? ' · ' + c.ubicacion : '' }}</div></td><td class="num"><b>+{{ cantidadTxt(c.cantidad) }}</b></td>
               <td><button class="btn ghost sm icon" @click="quitar(c)" title="Deshacer"><Icono n="deshacer"/></button></td></tr>
             <tr v-if="!capturas.length"><td class="empty">Aún no hay capturas.</td></tr></tbody></table></div></div>
       </div>
@@ -198,7 +198,7 @@ const Revision = {
         try { await api.post(`/api/conteos/${p.conteo.id}/cancelar`); emit('cambio'); } catch (e) { errorToast(e); } }
     }
     const exportar = f => exportarArchivo(`/api/conteos/${p.conteo.id}/informe`, {}, f, `conteo-${p.conteo.id}`).catch(errorToast);
-    return { r, filtro, sel, filas, visibles, cuenta, seleccion, editable, dlgAplicar, asumir, cargando, reconteo, aplicar, cancelar, exportar, peso, entero, porcentaje };
+    return { r, filtro, sel, filas, visibles, cuenta, seleccion, editable, dlgAplicar, asumir, cargando, reconteo, aplicar, cancelar, exportar, peso, entero, porcentaje, cantidadTxt };
   },
   template: `
     <div class="stack lg" v-if="r">
@@ -218,8 +218,8 @@ const Revision = {
         <div class="table-wrap" style="max-height:calc(100vh - 430px)"><table class="t"><thead><tr><th v-if="editable" style="width:40px"></th><th>Producto</th><th>Ubicación</th><th class="num">Sistema</th><th class="num">Contado</th><th class="num">Diferencia</th><th class="num">Valor (costo)</th><th class="num">%</th><th></th></tr></thead><tbody>
           <tr v-for="x in visibles" :key="x.producto_id"><td v-if="editable"><input type="checkbox" v-model="sel[x.producto_id]"></td>
             <td><b>{{ x.nombre }}</b><div class="xs muted">{{ x.codigo }}</div></td><td class="muted">{{ x.ubicacion || '—' }}</td>
-            <td class="num">{{ x.no_contado ? entero(x.stock_teorico) : entero(x.stock_teorico) }}</td><td class="num"><b>{{ x.contado === null ? '—' : entero(x.contado) }}</b></td>
-            <td class="num"><b :class="x.diferencia < 0 ? 'danger' : x.diferencia > 0 ? 'ok' : 'muted'">{{ x.diferencia === null ? '—' : (x.diferencia > 0 ? '+' : '') + x.diferencia }}</b></td>
+            <td class="num">{{ cantidadTxt(x.stock_teorico) }}<span class="xs muted" v-if="x.unidad === 'kg'"> kg</span></td><td class="num"><b>{{ x.contado === null ? '—' : cantidadTxt(x.contado) }}</b></td>
+            <td class="num"><b :class="x.diferencia < 0 ? 'danger' : x.diferencia > 0 ? 'ok' : 'muted'">{{ x.diferencia === null ? '—' : (x.diferencia > 0 ? '+' : '') + cantidadTxt(x.diferencia) }}</b></td>
             <td class="num" :class="x.valor_diferencia < 0 ? 'danger' : ''">{{ x.valor_diferencia === null ? '' : peso(x.valor_diferencia) }}</td><td class="num muted">{{ x.pct === null ? '' : porcentaje(x.pct) }}</td>
             <td><span class="chip danger" v-if="x.racha_faltantes >= 2">Faltante × {{ x.racha_faltantes }} conteos</span><span class="chip warn" v-if="x.no_contado">Sin contar</span><span class="chip" v-if="x.reconteo && !x.no_contado">Recontado</span></td></tr>
           <tr v-if="!filas.length"><td colspan="9" class="empty">Nada en esta vista.</td></tr>

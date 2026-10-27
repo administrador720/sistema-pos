@@ -13,7 +13,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from .. import models as m
-from ..core import ErrorNegocio, hoy
+from ..core import ErrorNegocio, cant, hoy
 from . import conteos as conteos_svc
 from . import inventario as inv
 
@@ -94,7 +94,8 @@ def _kpis(db: Session, d: date, h: date, filas: list[dict] | None = None) -> dic
     if filas is None:
         filas = Q(db, POR_PRODUCTO, **p)
     ventas, imp = sum(f["t"] for f in filas), sum(f["i"] for f in filas)
-    costo, unidades = sum(f["k"] for f in filas), sum(f["c"] for f in filas)
+    por_peso = {r["id"] for r in Q(db, "SELECT id FROM productos WHERE unidad = 'kg'")}  # los kilos no son «unidades»
+    costo, unidades = sum(f["k"] for f in filas), sum(f["c"] for f in filas if f["pid"] not in por_peso)
     t = Q(db, "SELECT COUNT(*) n, COALESCE(SUM(total),0) bruto FROM ventas WHERE estado='completada' "
               "AND fecha >= :d AND fecha < :h", **p)[0]
     sin_imp = ventas - imp
@@ -137,7 +138,7 @@ def dashboard(db: Session, desde: date | None, hasta: date | None) -> dict:
                    "WHERE v.estado='completada' AND v.fecha >= :d AND v.fecha < :h GROUP BY mp.id ORDER BY monto DESC", **p)
     def _nom(f):
         return nombres.get(f["pid"], ("(producto eliminado)", "Sin categoría"))
-    top_ventas = [{"nombre": _nom(f)[0], "ventas": f["t"], "unidades": f["c"]} for f in sorted(filas, key=lambda f: f["t"], reverse=True)[:10]]
+    top_ventas = [{"nombre": _nom(f)[0], "ventas": f["t"], "unidades": cant(f["c"])} for f in sorted(filas, key=lambda f: f["t"], reverse=True)[:10]]
     top_margen = [{"nombre": _nom(f)[0], "margen": round(f["t"] - f["i"] - f["k"])}
                   for f in sorted(filas, key=lambda f: f["t"] - f["i"] - f["k"], reverse=True)[:10]]
     por_cat: dict[str, dict] = {}
@@ -172,6 +173,11 @@ def dashboard(db: Session, desde: date | None, hasta: date | None) -> dict:
 
 # ───────────────────────────── Informes ─────────────────────────────
 def _tabla(titulo, columnas, filas, totales=None, nota=None):
+    claves = [c["key"] for c in columnas if c["tipo"] == "cantidad"]
+    for destino in [*filas, totales or {}]:  # las sumas en SQL arrastran ruido de decimales: se limpia aquí
+        for k in claves:
+            if isinstance(destino.get(k), float):
+                destino[k] = cant(destino[k])
     return {"titulo": titulo, "columnas": columnas, "filas": filas, "totales": totales or {}, "nota": nota}
 
 
@@ -196,7 +202,7 @@ def r_ventas_dia(db, d, h, **_):
     tot = _suma(filas, "tiquetes", "unidades", "descuentos", "impuestos", "ventas", "costo", "margen")
     tot["margen_pct"] = _pct(tot["margen"], tot["ventas"] - tot["impuestos"])
     return _tabla("Ventas por día", [_col("dia", "Día", "fecha"), _col("tiquetes", "Tiquetes", "entero"),
-                                     _col("unidades", "Unidades", "entero"), _col("descuentos", "Descuentos", "dinero"),
+                                     _col("unidades", "Unid. / kg", "cantidad"), _col("descuentos", "Descuentos", "dinero"),
                                      _col("impuestos", "Impuestos", "dinero"), _col("ventas", "Ventas netas", "dinero"),
                                      _col("costo", "Costo", "dinero"), _col("margen", "Margen $", "dinero"),
                                      _col("margen_pct", "Margen %", "porcentaje")], filas, tot,
@@ -222,7 +228,7 @@ def _agrupado(db, d, h, por: str):
     return filas, "categoria" if por == "categoria" else "producto"
 
 
-COLS_AGRUPADO = [_col("unidades", "Unidades", "entero"), _col("ventas", "Ventas", "dinero"), _col("costo", "Costo", "dinero"),
+COLS_AGRUPADO = [_col("unidades", "Unid. / kg", "cantidad"), _col("ventas", "Ventas", "dinero"), _col("costo", "Costo", "dinero"),
                  _col("margen", "Margen $", "dinero"), _col("margen_pct", "Margen %", "porcentaje"),
                  _col("participacion", "% de ventas", "porcentaje")]
 
@@ -308,7 +314,7 @@ def r_devoluciones(db, d, h, **_):
                   "JOIN ventas v ON v.id = dv.venta_id JOIN usuarios u ON u.id = dv.usuario_id "
                   "LEFT JOIN usuarios a ON a.id = dv.autorizado_por WHERE dv.fecha >= :d AND dv.fecha < :h ORDER BY dv.fecha DESC", **_par(d, h))
     return _tabla("Devoluciones", [_col("fecha", "Fecha", "fechahora"), _col("numero", "Tiquete"), _col("cajero", "Cajero"),
-                                   _col("autorizado", "Autorizó"), _col("unidades", "Unidades", "entero"), _col("total", "Total", "dinero"),
+                                   _col("autorizado", "Autorizó"), _col("unidades", "Unid. / kg", "cantidad"), _col("total", "Total", "dinero"),
                                    _col("medio", "Reintegro"), _col("motivo", "Motivo")], filas, _suma(filas, "unidades", "total"))
 
 
@@ -384,8 +390,8 @@ def r_cobertura(db, d, h, **_):
                            "HAVING u30 > 0 ORDER BY pr.stock_actual / (u30 / 30.0) ASC LIMIT 1000", **p)
     for f in filas:
         f["cobertura"] = round(max(f["stock"], 0) / f["diaria"], 1) if f["diaria"] else None
-    return _tabla("Cobertura de inventario", [_col("nombre", "Producto"), _col("stock", "Stock", "entero"), _col("minimo", "Mínimo", "entero"),
-                                              _col("u30", "Vendido 30 días", "entero"), _col("diaria", "Venta diaria", "decimal"),
+    return _tabla("Cobertura de inventario", [_col("nombre", "Producto"), _col("stock", "Stock", "cantidad"), _col("minimo", "Mínimo", "cantidad"),
+                                              _col("u30", "Vendido 30 días", "cantidad"), _col("diaria", "Venta diaria", "decimal"),
                                               _col("cobertura", "Cobertura (días)", "decimal")], filas,
                   nota="Cuántos días alcanza el stock actual al ritmo de venta de los últimos 30 días. Primero los más urgentes.")
 
@@ -424,7 +430,7 @@ def r_sin_movimiento(db, d, h, dias=60, **_):
         filas.append({"nombre": r["nombre"], "categoria": r["categoria"], "stock": r["stock"], "valor": r["valor"], "ultima": ultima,
                       "dias": (hoy() - date.fromisoformat(ultima[:10])).days if ultima else None})
     return _tabla(f"Productos sin movimiento ({dias} días)", [_col("nombre", "Producto"), _col("categoria", "Categoría"),
-                                                              _col("stock", "Stock", "entero"), _col("valor", "Dinero inmovilizado", "dinero"),
+                                                              _col("stock", "Stock", "cantidad"), _col("valor", "Dinero inmovilizado", "dinero"),
                                                               _col("ultima", "Última venta", "fechahora"), _col("dias", "Días sin vender", "entero")],
                   filas, _suma(filas, "stock", "valor"), "Dinero detenido en estantería: candidatos a promoción o a no volver a comprar.")
 
@@ -443,9 +449,9 @@ def r_sugerido(db, d, h, dias_cobertura=7, **_):
         if sug > 0:
             out.append({**f, "sugerido": sug, "valor": round(sug * f["costo"])})
     out.sort(key=lambda f: (f["proveedor"], -f["valor"]))
-    return _tabla("Sugerido de compras", [_col("proveedor", "Proveedor"), _col("nombre", "Producto"), _col("stock", "Stock", "entero"),
-                                          _col("minimo", "Mínimo", "entero"), _col("diaria", "Venta diaria", "decimal"),
-                                          _col("sugerido", "Sugerido", "entero"), _col("costo", "Costo", "decimal"),
+    return _tabla("Sugerido de compras", [_col("proveedor", "Proveedor"), _col("nombre", "Producto"), _col("stock", "Stock", "cantidad"),
+                                          _col("minimo", "Mínimo", "cantidad"), _col("diaria", "Venta diaria", "decimal"),
+                                          _col("sugerido", "Sugerido", "cantidad"), _col("costo", "Costo", "decimal"),
                                           _col("valor", "Valor estimado", "dinero")], out, _suma(out, "sugerido", "valor"),
                   f"Sugerido = venta diaria (30 días) × {dias_cobertura} días de cobertura + stock mínimo − stock actual.")
 
@@ -455,7 +461,7 @@ def r_valorizacion(db, d, h, **_):
                   "ROUND(SUM(MAX(pr.stock_actual,0) * pr.costo_promedio)) costo, SUM(MAX(pr.stock_actual,0) * pr.precio_venta) venta "
                   "FROM productos pr LEFT JOIN categorias c ON c.id = pr.categoria_id WHERE pr.activo = 1 GROUP BY c.id ORDER BY costo DESC")
     return _tabla("Valorización del inventario", [_col("nombre", "Categoría"), _col("productos", "Productos", "entero"),
-                                                  _col("unidades", "Unidades", "entero"), _col("costo", "Valor a costo", "dinero"),
+                                                  _col("unidades", "Unid. / kg", "cantidad"), _col("costo", "Valor a costo", "dinero"),
                                                   _col("venta", "Valor a precio de venta", "dinero")], filas,
                   _suma(filas, "productos", "unidades", "costo", "venta"), "Stock negativo no se valora.")
 
@@ -475,7 +481,7 @@ def r_mermas(db, d, h, agrupar="motivo", **_):
     ventas = Q(db, "SELECT COALESCE(SUM(total),0) t FROM ventas WHERE estado='completada' AND fecha >= :d AND fecha < :h", **p)[0]["t"]
     tot = _suma(filas, "unidades", "valor")
     return _tabla("Mermas por " + ("producto" if agrupar == "producto" else "motivo"),
-                  [_col("nombre", "Producto" if agrupar == "producto" else "Motivo"), _col("unidades", "Unidades", "entero"),
+                  [_col("nombre", "Producto" if agrupar == "producto" else "Motivo"), _col("unidades", "Unid. / kg", "cantidad"),
                    _col("valor", "Valor a costo", "dinero")], filas, tot,
                   f"Merma = {_pct(tot['valor'], ventas) or 0} % de las ventas del periodo.")
 
@@ -542,8 +548,8 @@ def r_kardex(db, d, h, producto_id=None, **_):
     if not p:
         raise ErrorNegocio("Producto no encontrado.", 404)
     filas = inv.kardex(db, p.id, d, h, limite=5000)
-    return _tabla(f"Kardex: {p.nombre}", [_col("fecha", "Fecha", "fechahora"), _col("tipo_nombre", "Movimiento"), _col("cantidad", "Cantidad", "entero"),
-                                          _col("costo_unitario", "Costo", "decimal"), _col("stock_resultante", "Saldo", "entero"),
+    return _tabla(f"Kardex: {p.nombre}", [_col("fecha", "Fecha", "fechahora"), _col("tipo_nombre", "Movimiento"), _col("cantidad", "Cantidad", "cantidad"),
+                                          _col("costo_unitario", "Costo", "decimal"), _col("stock_resultante", "Saldo", "cantidad"),
                                           _col("usuario", "Usuario"), _col("nota", "Nota")], filas)
 
 

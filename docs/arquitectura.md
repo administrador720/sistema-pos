@@ -46,6 +46,7 @@ Todos devuelven `{titulo, columnas, filas, totales, nota}` y la misma estructura
 | APScheduler | Un hilo que revisa cada minuto (`jobs.py`) | Misma función, una dependencia menos |
 | Modelos en paquete | `models.py` único | Son ~30 tablas; un archivo se lee entero |
 | Ventas "suspendidas" dentro de `ventas` | Tabla propia `ventas_suspendidas` (JSON del carrito) | Mantiene el consecutivo de `ventas` sin huecos |
+| Cantidades con decimales | `Cantidad` (TypeDecorator sobre INTEGER, 3 decimales); dinero siempre con aritmética entera (`valor_linea`) | Un producto por peso se guarda en kilos (1,250); no se cambia el esquema de las bases anteriores y el stock no acumula ruido de coma flotante |
 | Costos como pesos enteros | Costos `REAL`; precios y montos de venta `INTEGER` | Un promedio ponderado necesita decimales (un costo de $83,33 no debe redondearse) |
 | Respaldo a Google Drive por API | Copia a una **carpeta externa** configurable (USB, disco, o carpeta sincronizada de Drive/OneDrive/Dropbox) | Sin credenciales ni OAuth; igual de efectivo |
 | Informes "Kardex" sueltos | Kardex en Inventario y también como informe exportable | — |

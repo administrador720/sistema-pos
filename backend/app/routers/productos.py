@@ -45,6 +45,12 @@ def por_codigo(codigo: str, _: Usuario, db: DB):
     return {**svc.serializar(p, completo=False), "unidades_por_codigo": unidades}
 
 
+@router.get("/rapidos")
+def rapidos(u: Usuario, db: DB):
+    """Botones de acceso rápido de la caja (verduras y frutas de todos los días)."""
+    return [sin_costos(p, u) for p in svc.rapidos(db)]
+
+
 @router.get("/plantilla")
 def plantilla(_: Admin):
     return Response(svc.plantilla_xlsx(), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

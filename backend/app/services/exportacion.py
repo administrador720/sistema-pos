@@ -7,6 +7,12 @@ from datetime import datetime
 from .. import config
 
 
+def _cantidad(valor) -> str:
+    v = round(float(valor), 3)
+    txt = f"{int(v):,}" if v == int(v) else f"{v:,.3f}".rstrip("0")
+    return txt.replace(",", "X").replace(".", ",").replace("X", ".")
+
+
 def _fmt(valor, tipo: str) -> str:
     if valor is None or valor == "":
         return ""
@@ -14,6 +20,8 @@ def _fmt(valor, tipo: str) -> str:
         return "$ " + f"{int(round(valor)):,}".replace(",", ".")
     if tipo == "entero":
         return f"{int(valor):,}".replace(",", ".")
+    if tipo == "cantidad":  # 5 unidades o 1,250 kg
+        return _cantidad(valor)
     if tipo == "porcentaje":
         return f"{valor:.1f} %".replace(".", ",")
     if tipo == "decimal":
@@ -169,7 +177,10 @@ def recibo_pdf(venta: dict, negocio: dict) -> bytes:
         c.setFont("Helvetica", 8)
         c.drawString(4 * mm, y, it["descripcion"][:34])
         y -= 10
-        par(f"  {it['cantidad']} x {din(it['precio_unitario'])}", din(it["total"] + 0))
+        if it.get("unidad") == "kg":  # producto por peso: «1,250 kg x $ 4.000/kg»
+            par(f"  {_cantidad(it['cantidad'])} kg x {din(it['precio_unitario'])}/kg", din(it["total"] + 0))
+        else:
+            par(f"  {_cantidad(it['cantidad'])} x {din(it['precio_unitario'])}", din(it["total"] + 0))
     linea()
     par("Subtotal", din(venta["subtotal"]))
     if venta["descuento_total"]:

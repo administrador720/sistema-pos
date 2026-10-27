@@ -1,7 +1,7 @@
 // Componentes compartidos
 import { api, query } from './api.js';
 import { store } from './store.js';
-import { descargarBlob, miles, peso, debounce } from './util.js';
+import { descargarBlob, miles, peso, debounce, conUnidad } from './util.js';
 
 const { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } = Vue;
 
@@ -109,6 +109,34 @@ export const InputDinero = {
       :value="texto" :placeholder="placeholder" :disabled="disabled" @input="alEscribir" @keydown.enter="$emit('enter')" @focus="$event.target.select()">`,
 };
 
+// ───────────────────────── Campo de cantidad con decimales (kilos) ─────────────────────────
+// Acepta «1,25» o «1.25»; máximo 3 decimales (gramos). Emite un número o null.
+export const InputPeso = {
+  props: { modelValue: { type: Number, default: null }, grande: Boolean, placeholder: String, maximo: { type: Number, default: 1000 }, decimales: { type: Number, default: 3 } },
+  emits: ['update:modelValue', 'enter'],
+  setup(p, { emit, expose }) {
+    const el = ref(null);
+    const aTexto = v => (v === null || v === undefined ? '' : String(v).replace('.', ','));
+    const analizar = t => { const n = parseFloat(String(t).replace(',', '.')); return Number.isFinite(n) ? n : null; };
+    const texto = ref(aTexto(p.modelValue));
+    watch(() => p.modelValue, v => { if (analizar(texto.value) !== v) texto.value = aTexto(v); });
+    function alEscribir(e) {
+      let t = e.target.value.replace(/[^\d.,]/g, '');
+      const i = t.search(/[.,]/);
+      if (i >= 0) t = t.slice(0, i).slice(0, 5) + ',' + t.slice(i + 1).replace(/[.,]/g, '').slice(0, p.decimales);
+      else t = t.slice(0, 5);
+      let v = analizar(t);
+      if (v !== null && v > p.maximo) { v = p.maximo; t = aTexto(v); }
+      texto.value = t; e.target.value = t;
+      emit('update:modelValue', v);
+    }
+    expose({ focus: () => { el.value?.focus(); el.value?.select(); } });
+    return { el, texto, alEscribir };
+  },
+  template: `<input ref="el" class="input num" :class="{ 'money-lg': grande }" inputmode="decimal" autocomplete="off"
+      :value="texto" :placeholder="placeholder" @input="alEscribir" @keydown.enter="$emit('enter')" @focus="$event.target.select()">`,
+};
+
 // ───────────────────────── Buscador de producto con sugerencias ─────────────────────────
 export const BuscaProducto = {
   props: { placeholder: { type: String, default: 'Buscar producto por nombre o código…' }, limpiar: { type: Boolean, default: true } },
@@ -136,7 +164,7 @@ export const BuscaProducto = {
     }
     const cerrarLuego = () => setTimeout(() => { abierto.value = false; }, 150);
     expose({ focus: () => el.value?.focus(), limpiar: () => { q.value = ''; items.value = []; } });
-    return { q, items, abierto, activo, el, elegir, enter, tecla, peso, cerrarLuego };
+    return { q, items, abierto, activo, el, elegir, enter, tecla, peso, cerrarLuego, conUnidad };
   },
   template: `
     <div style="position:relative">
@@ -145,7 +173,7 @@ export const BuscaProducto = {
       <div class="suggest" v-if="abierto && items.length">
         <button v-for="(it, i) in items" :key="it.id" :class="{ on: i === activo }" @mousedown.prevent="elegir(it)">
           <span><b>{{ it.nombre }}</b><br><span class="xs muted">{{ it.codigos[0] ? it.codigos[0].codigo : (it.codigo_interno || 'sin código') }}</span></span>
-          <span class="right nowrap"><b class="num">{{ peso(it.precio_venta) }}</b><br><span class="xs muted">stock {{ it.stock_actual }}</span></span>
+          <span class="right nowrap"><b class="num">{{ peso(it.precio_venta) }}<span v-if="it.unidad === 'kg'" class="xs muted">/kg</span></b><br><span class="xs muted">stock {{ conUnidad(it.stock_actual, it.unidad) }}</span></span>
         </button>
       </div>
     </div>`,
@@ -281,7 +309,7 @@ export function ordenarPor(filas, clave, asc) {
 }
 
 export function registrar(app) {
-  app.component('Icono', Icono).component('Modal', Modal).component('InputDinero', InputDinero)
+  app.component('Icono', Icono).component('Modal', Modal).component('InputDinero', InputDinero).component('InputPeso', InputPeso)
     .component('BuscaProducto', BuscaProducto).component('Grafico', Grafico)
     .component('DialogoPin', DialogoPin).component('DialogoConfirmar', DialogoConfirmar)
     .component('VisorPdf', VisorPdf).component('DialogoTexto', DialogoTexto).component('Avisos', Avisos);

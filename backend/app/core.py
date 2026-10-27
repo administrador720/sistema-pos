@@ -51,12 +51,25 @@ def redondear(x: float) -> int:
     return int(math.floor(abs(x) + 0.5)) * (1 if x >= 0 else -1)
 
 
-def desglosar_impuesto(total: int, cantidad: int, tarifa_pct: float, valor_fijo: int) -> int:
+def cant(x) -> int | float:
+    """Normaliza una cantidad: máximo 3 decimales (gramos) y entero cuando lo es (5, no 5.0).
+    Es la única forma de sumar/restar cantidades, así no se acumula ruido de decimales."""
+    v = round(float(x), 3)
+    return int(v) if v == int(v) else v
+
+
+def valor_linea(precio: int, cantidad) -> int:
+    """Precio × cantidad en pesos, con aritmética entera (mitad hacia arriba): 0,350 kg × $3.500 = $1.225."""
+    milis = int(round(float(cantidad) * 1000))
+    return (precio * milis + 500) // 1000
+
+
+def desglosar_impuesto(total: int, cantidad: int | float, tarifa_pct: float, valor_fijo: int) -> int:
     """Impuesto contenido en `total` (el precio ya incluye el impuesto). Devuelve el valor del impuesto."""
     if total <= 0:
         return 0
     if valor_fijo and valor_fijo > 0:
-        return min(total, valor_fijo * cantidad)
+        return min(total, valor_linea(valor_fijo, cantidad))
     if tarifa_pct and tarifa_pct > 0:
         base = redondear(total / (1 + tarifa_pct / 100.0))
         return total - base

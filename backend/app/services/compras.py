@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from .. import models as m
 from ..core import ErrorNegocio, ahora, auditar
 from . import inventario as inv
+from . import unidades
 from .productos import cambiar_precio
 
 
@@ -26,11 +27,9 @@ def crear_compra(db: Session, usuario: m.Usuario, datos: dict) -> m.Compra:
     total = 0.0
     for e in items:
         p = db.get(m.Producto, int(e["producto_id"]))
-        cant, costo = int(e["cantidad"]), float(e["costo_unitario"])
         if not p:
             raise ErrorNegocio("Producto no encontrado en la compra.", 404)
-        if cant <= 0:
-            raise ErrorNegocio(f"Cantidad no válida para «{p.nombre}».")
+        cant, costo = unidades.normalizar(p, e["cantidad"]), float(e["costo_unitario"])
         if costo < 0:
             raise ErrorNegocio(f"Costo no válido para «{p.nombre}».")
         inv.aplicar_compra_a_costo(p, cant, costo)
@@ -53,6 +52,7 @@ def serializar(c: m.Compra, detalle: bool = False) -> dict:
          "nota": c.nota, "n_items": len(c.items)}
     if detalle:
         d["items"] = [{"producto_id": i.producto_id, "nombre": i.producto.nombre, "cantidad": i.cantidad,
+                       "unidad": i.producto.unidad,
                        "costo_unitario": round(i.costo_unitario, 2), "subtotal": round(i.cantidad * i.costo_unitario)}
                       for i in c.items]
     return d

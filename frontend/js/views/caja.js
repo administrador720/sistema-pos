@@ -1,7 +1,7 @@
 // Pantalla de caja: escaneo, carrito, cobro (efectivo / banco / mixto), suspendidas, devoluciones
 import { api, query } from '../api.js';
 import { store, esAdmin, errorToast, toast, refrescarTurno, confirmar, pedirPin, pedirTexto, verPdf } from '../store.js';
-import { peso, miles, beep, hora, fechaHora, debounce } from '../util.js';
+import { peso, miles, beep, hora, fechaHora, debounce, kilos, cantidadTxt, conUnidad, valorLinea, bruta } from '../util.js';
 
 const { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick, watch } = Vue;
 
@@ -162,7 +162,7 @@ const Buscador = {
       else if (e.key === 'Enter' && items.value[activo.value]) { e.preventDefault(); emit('elegir', items.value[activo.value]); }
       nextTick(() => document.querySelector('.res-fila.on')?.scrollIntoView({ block: 'nearest' }));
     }
-    return { q, items, activo, el, tecla, peso };
+    return { q, items, activo, el, tecla, peso, conUnidad };
   },
   template: `
     <Modal titulo="Buscar producto" ancho="md" @cerrar="$emit('cerrar')">
@@ -172,7 +172,7 @@ const Buscador = {
           <table class="t compact"><tbody>
             <tr v-for="(it, i) in items" :key="it.id" class="clickable res-fila" :class="{ on: i === activo, sel: i === activo }" @click="$emit('elegir', it)">
               <td><b>{{ it.nombre }}</b><br><span class="xs muted">{{ it.codigos[0] ? it.codigos[0].codigo : 'sin código' }} · {{ it.categoria || 'Sin categoría' }}</span></td>
-              <td class="num"><b>{{ peso(it.precio_venta) }}</b><br><span class="xs" :class="it.stock_actual <= 0 ? 'danger' : 'muted'">stock {{ it.stock_actual }}</span></td>
+              <td class="num"><b>{{ peso(it.precio_venta) }}</b><span v-if="it.unidad === 'kg'" class="xs muted"> /kg</span><br><span class="xs" :class="it.stock_actual <= 0 ? 'danger' : 'muted'">stock {{ conUnidad(it.stock_actual, it.unidad) }}</span></td>
             </tr>
             <tr v-if="!items.length"><td class="empty">{{ q ? 'Sin resultados.' : 'Escriba para buscar.' }}</td></tr>
           </tbody></table>
@@ -201,17 +201,17 @@ const ModalDescuento = {
   emits: ['aplicar', 'cerrar'],
   setup(p, { emit }) {
     const destino = ref(p.item ? 'linea' : 'total'), tipo = ref('pct'), valor = ref(null), el = ref(null);
-    const base = computed(() => destino.value === 'linea' ? p.item.precio * p.item.cantidad : p.bruto);
+    const base = computed(() => destino.value === 'linea' ? bruta(p.item) : p.bruto);
     const monto = computed(() => { const v = valor.value || 0; return Math.min(base.value, tipo.value === 'pct' ? Math.round(base.value * Math.min(v, 100) / 100) : v); });
     const pct = computed(() => base.value ? monto.value * 100 / base.value : 0);
     const limite = parseInt(store.config.descuento_max_pct_cajero || '0', 10);
     onMounted(() => el.value?.focus());
-    return { destino, tipo, valor, el, monto, pct, limite, esAdmin, peso, aplicar: () => emit('aplicar', { destino: destino.value, monto: monto.value }) };
+    return { destino, tipo, valor, el, monto, pct, limite, esAdmin, peso, bruta, aplicar: () => emit('aplicar', { destino: destino.value, monto: monto.value }) };
   },
   template: `<Modal titulo="Descuento" ancho="sm" @cerrar="$emit('cerrar')">
       <div class="stack">
         <div class="seg" v-if="item"><button :class="{ on: destino === 'linea' }" @click="destino = 'linea'">Al producto</button><button :class="{ on: destino === 'total' }" @click="destino = 'total'">A toda la venta</button></div>
-        <p class="small muted" v-if="destino === 'linea' && item">{{ item.nombre }} · {{ peso(item.precio * item.cantidad) }}</p>
+        <p class="small muted" v-if="destino === 'linea' && item">{{ item.nombre }} · {{ peso(bruta(item)) }}</p>
         <div class="seg"><button :class="{ on: tipo === 'pct' }" @click="tipo = 'pct'">Porcentaje %</button><button :class="{ on: tipo === 'valor' }" @click="tipo = 'valor'">Valor $</button></div>
         <InputDinero ref="el" v-model="valor" grande :placeholder="tipo === 'pct' ? '10' : '0'" @enter="aplicar"/>
         <div class="row between"><span class="muted">Descuento</span><b class="num">{{ peso(monto) }} ({{ pct.toFixed(1) }} %)</b></div>
@@ -271,6 +271,82 @@ const ModalCrearRapido = {
       <template #pie><button class="btn" @click="$emit('cerrar')">Cancelar</button><button class="btn primary" :disabled="!f.nombre.trim() || !f.precio || cargando" @click="crear">Crear y agregar</button></template></Modal>`,
 };
 
+// ───────────────────────── Producto por peso: kilos o valor en pesos ─────────────────────────
+const KILOS_RAPIDOS = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 5];
+const VALORES_RAPIDOS = [1000, 2000, 3000, 5000, 10000];
+const ModalPeso = {
+  props: { prod: Object, inicial: Object },   // inicial: { cantidad, valor } al corregir una línea
+  emits: ['aceptar', 'cerrar'],
+  setup(p, { emit }) {
+    const modo = ref(p.inicial?.valor ? 'valor' : 'kilos');
+    const kg = ref(p.inicial && !p.inicial.valor ? p.inicial.cantidad : null);
+    const pesos = ref(p.inicial?.valor ?? null);
+    const inKg = ref(null), inVal = ref(null);
+    const precio = computed(() => p.prod.precio_venta);
+    const cantidad = computed(() => modo.value === 'kilos' ? (kg.value || 0)
+      : (pesos.value && precio.value ? Math.round(pesos.value / precio.value * 1000) / 1000 : 0));
+    const subtotal = computed(() => modo.value === 'valor' ? (pesos.value || 0) : valorLinea(precio.value, cantidad.value));
+    const valido = computed(() => precio.value > 0 && cantidad.value >= 0.001 && subtotal.value > 0);
+    const poco = computed(() => valido.value && p.prod.stock_actual !== undefined && p.prod.stock_actual < cantidad.value);
+    const enfocar = () => nextTick(() => (modo.value === 'kilos' ? inKg : inVal).value?.focus());
+    onMounted(enfocar);
+    watch(modo, enfocar);
+    function aceptar() { if (valido.value) emit('aceptar', { cantidad: cantidad.value, valor: modo.value === 'valor' ? pesos.value : null }); }
+    return { modo, kg, pesos, inKg, inVal, precio, cantidad, subtotal, valido, poco, aceptar, peso, kilos, miles, KILOS_RAPIDOS, VALORES_RAPIDOS,
+      fijarKg: x => { kg.value = x; enfocar(); }, fijarValor: x => { pesos.value = x; enfocar(); } };
+  },
+  template: `<Modal :titulo="prod.nombre" ancho="sm" @cerrar="$emit('cerrar')">
+      <div class="stack">
+        <div class="row between"><span class="muted">Precio por kilo</span><b class="num">{{ peso(precio) }} / kg</b></div>
+        <div class="alert danger" v-if="!(precio > 0)"><Icono n="alerta"/>Este producto no tiene precio por kilo. Asígnelo en Productos.</div>
+        <div class="seg" style="align-self:stretch;display:grid;grid-template-columns:1fr 1fr">
+          <button :class="{ on: modo === 'kilos' }" @click="modo = 'kilos'">Peso en kilos</button>
+          <button :class="{ on: modo === 'valor' }" @click="modo = 'valor'">Valor en pesos</button></div>
+        <div class="field" v-if="modo === 'kilos'"><label>Peso (kg) · lo que marca la balanza</label>
+          <InputPeso ref="inKg" v-model="kg" grande placeholder="0,000" @enter="aceptar"/></div>
+        <div class="field" v-else><label>¿Cuánto quiere gastar el cliente?</label>
+          <InputDinero ref="inVal" v-model="pesos" grande placeholder="0" @enter="aceptar"/></div>
+        <div class="quick" v-if="modo === 'kilos'"><button v-for="x in KILOS_RAPIDOS" :key="x" class="btn sm" tabindex="-1" @click="fijarKg(x)">{{ String(x).replace('.', ',') }} kg</button></div>
+        <div class="quick" v-else><button v-for="x in VALORES_RAPIDOS" :key="x" class="btn sm" tabindex="-1" @click="fijarValor(x)">{{ peso(x) }}</button></div>
+        <div class="peso-total">
+          <div class="small" v-if="modo === 'kilos'">Valor a cobrar</div><div class="small" v-else>Debe pesar aproximadamente</div>
+          <div class="big">{{ modo === 'kilos' ? peso(subtotal) : kilos(cantidad) }}</div>
+          <div class="small" v-if="modo === 'valor' && valido">Se cobran {{ peso(subtotal) }} exactos</div>
+          <div class="small" v-else-if="modo === 'kilos' && valido">{{ kilos(cantidad) }} × {{ peso(precio) }}</div>
+        </div>
+        <div class="alert" v-if="poco"><Icono n="alerta"/>Hay {{ kilos(prod.stock_actual) }} en el sistema. Se puede vender igual; revise el inventario.</div>
+      </div>
+      <template #pie><button class="btn" @click="$emit('cerrar')">Cancelar</button>
+        <button class="btn primary lg" :disabled="!valido" @click="aceptar"><Icono n="check"/> {{ inicial ? 'Guardar' : 'Agregar' }} <span class="kbd">Enter</span></button></template></Modal>`,
+};
+
+// Botones grandes con las verduras y frutas de todos los días (se marcan en Productos)
+const ModalRapidos = {
+  emits: ['elegir', 'cerrar'],
+  setup(p, { emit }) {
+    const lista = ref([]), cargando = ref(true), q = ref(''), el = ref(null);
+    const norm = x => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    onMounted(async () => { try { lista.value = await api.get('/api/productos/rapidos'); } catch (e) { errorToast(e); } cargando.value = false; el.value?.focus(); });
+    const filtrada = computed(() => { const t = norm(q.value).trim(); return t ? lista.value.filter(x => norm(x.nombre).includes(t) || (x.codigo_interno || '') === t) : lista.value; });
+    function enter() { if (filtrada.value.length === 1) emit('elegir', filtrada.value[0]); }
+    return { lista, cargando, q, el, filtrada, enter, peso, esAdmin, ir: h => { location.hash = h; } };
+  },
+  template: `<Modal titulo="Verduras y frutas" ancho="lg" @cerrar="$emit('cerrar')">
+      <div class="stack">
+        <input ref="el" class="input" v-model="q" placeholder="Filtrar por nombre o escribir el código corto…" @keydown.enter.prevent="enter" autocomplete="off">
+        <div class="rapidos" v-if="filtrada.length">
+          <button v-for="x in filtrada" :key="x.id" class="rapido" @click="$emit('elegir', x)">
+            <b>{{ x.nombre }}</b><span class="pr">{{ peso(x.precio_venta) }} / kg</span><span class="plu" v-if="x.codigo_interno">código {{ x.codigo_interno }}</span></button>
+        </div>
+        <div class="empty" v-else-if="!cargando && lista.length">Ningún producto coincide con «{{ q }}».</div>
+        <div class="empty" v-else-if="!cargando"><b>Todavía no hay botones rápidos.</b><br>
+          <span class="small">En <b>Productos</b>, abra una verdura y marque «Botón rápido en la caja». También puede buscar cualquier producto con F2 o escribir su código corto.</span>
+          <div style="margin-top:12px" v-if="esAdmin()"><button class="btn" @click="ir('#/productos'); $emit('cerrar')">Ir a Productos</button></div></div>
+        <p class="hint">Después de elegir, escriba el peso que marca la balanza y presione Enter.</p>
+      </div>
+    </Modal>`,
+};
+
 // ───────────────────────── Ventas del turno + devolución ─────────────────────────
 const ModalDevolucion = {
   props: { ventaId: Number },
@@ -278,7 +354,7 @@ const ModalDevolucion = {
   setup(p, { emit }) {
     const v = ref(null), cant = reactive({}), danado = reactive({}), medio = ref('efectivo'), motivo = ref(''), cargando = ref(false);
     onMounted(async () => { try { v.value = await api.get('/api/ventas/' + p.ventaId); } catch (e) { errorToast(e); emit('cerrar'); } });
-    const restante = it => it.cantidad - it.devuelto;
+    const restante = it => Math.round((it.cantidad - it.devuelto) * 1000) / 1000;
     const total = computed(() => !v.value ? 0 : v.value.items.reduce((s, it) => s + Math.round(it.total * (cant[it.id] || 0) / it.cantidad), 0));
     const hayItems = computed(() => Object.values(cant).some(x => x > 0));
     async function devolver() {
@@ -289,13 +365,13 @@ const ModalDevolucion = {
         toast('Devolución registrada.', 'ok'); emit('hecho');
       } catch (e) { errorToast(e); } finally { cargando.value = false; }
     }
-    return { v, cant, danado, medio, motivo, cargando, restante, total, hayItems, devolver, peso };
+    return { v, cant, danado, medio, motivo, cargando, restante, total, hayItems, devolver, peso, conUnidad };
   },
   template: `<Modal :titulo="'Devolución · ' + (v ? v.numero : '')" ancho="lg" @cerrar="$emit('cerrar')">
       <div v-if="v" class="stack">
         <table class="t compact"><thead><tr><th>Producto</th><th class="num">Vendido</th><th class="num">Ya devuelto</th><th class="num">Devolver</th><th>¿Dañado?</th><th class="num">Valor</th></tr></thead><tbody>
-          <tr v-for="it in v.items" :key="it.id"><td>{{ it.descripcion }}</td><td class="num">{{ it.cantidad }}</td><td class="num">{{ it.devuelto }}</td>
-            <td class="num"><input class="input sm num" type="number" min="0" :max="restante(it)" :disabled="restante(it) === 0" style="width:80px" v-model.number="cant[it.id]"></td>
+          <tr v-for="it in v.items" :key="it.id"><td>{{ it.descripcion }}</td><td class="num">{{ conUnidad(it.cantidad, it.unidad) }}</td><td class="num">{{ conUnidad(it.devuelto, it.unidad) }}</td>
+            <td class="num"><input class="input sm num" type="number" min="0" :max="restante(it)" :step="it.unidad === 'kg' ? 0.001 : 1" :disabled="restante(it) === 0" style="width:96px" v-model.number="cant[it.id]"></td>
             <td><label class="check"><input type="checkbox" v-model="danado[it.id]" :disabled="!cant[it.id]"> sí</label></td>
             <td class="num">{{ peso(Math.round(it.total * (cant[it.id] || 0) / it.cantidad)) }}</td></tr>
         </tbody></table>
@@ -369,11 +445,12 @@ const ModalMovimiento = {
 
 // ───────────────────────── Vista principal ─────────────────────────
 export const Caja = {
-  components: { Cobro, Resultado, Buscador, ModalCantidad, ModalDescuento, ModalEtiqueta, ModalSuspendidas, ModalCrearRapido, ModalVentasTurno, ModalMovimiento },
+  components: { Cobro, Resultado, Buscador, ModalPeso, ModalRapidos, ModalCantidad, ModalDescuento, ModalEtiqueta, ModalSuspendidas, ModalCrearRapido, ModalVentasTurno, ModalMovimiento },
   setup() {
     const carrito = reactive({ items: [], descuentoGlobal: 0 });
-    const scan = ref(''), sel = ref(-1), cantPend = ref(1), flash = ref(-1);
-    const dlg = ref(null);   // 'cobro' | 'buscar' | 'cantidad' | 'descuento' | 'etiqueta' | 'suspendidas' | 'rapido' | 'ventas' | 'resultado'
+    const scan = ref(''), sel = ref(-1), cantPend = ref(1), explicita = ref(false), flash = ref(-1);
+    const pesoProd = ref(null), pesoIdx = ref(-1);   // producto por peso en la ventana de peso, y línea que se corrige (-1 = nueva)
+    const dlg = ref(null);   // 'cobro' | 'buscar' | 'peso' | 'rapidos' | 'cantidad' | 'descuento' | 'etiqueta' | 'suspendidas' | 'rapido' | 'ventas' | 'resultado'
     const modoCobro = ref('efectivo'), ventaOk = ref(null), buscarInicial = ref(''), codigoNuevo = ref('');
     const inScan = ref(null), ocupado = ref(false);
 
@@ -381,10 +458,10 @@ export const Caja = {
     try { const g = JSON.parse(sessionStorage.getItem('pos_carrito') || 'null'); if (g && g.turno === store.turno?.id) { carrito.items = g.items; carrito.descuentoGlobal = g.descuentoGlobal || 0; sel.value = carrito.items.length - 1; } } catch (e) { /* */ }
     watch(carrito, () => { try { sessionStorage.setItem('pos_carrito', JSON.stringify({ turno: store.turno?.id, items: carrito.items, descuentoGlobal: carrito.descuentoGlobal })); } catch (e) { /* */ } }, { deep: true });
 
-    const bruto = computed(() => carrito.items.reduce((s, i) => s + i.precio * i.cantidad, 0));
+    const bruto = computed(() => carrito.items.reduce((s, i) => s + bruta(i), 0));
     const descLineas = computed(() => carrito.items.reduce((s, i) => s + (i.descuento || 0), 0));
     const total = computed(() => Math.max(0, bruto.value - descLineas.value - carrito.descuentoGlobal));
-    const unidades = computed(() => carrito.items.reduce((s, i) => s + i.cantidad, 0));
+    const unidades = computed(() => carrito.items.reduce((s, i) => s + (i.unidad === 'kg' ? 1 : i.cantidad), 0));   // un producto por peso cuenta como 1 artículo
     const itemSel = computed(() => carrito.items[sel.value] || null);
     const hayTurno = computed(() => !!store.turno);
 
@@ -394,38 +471,71 @@ export const Caja = {
     function recalcDescGlobal() { if (carrito.descuentoGlobal > bruto.value - descLineas.value) carrito.descuentoGlobal = Math.max(0, bruto.value - descLineas.value); }
 
     function agregar(prod, cantidad = 1) {
-      const idx = carrito.items.findIndex(i => i.producto_id === prod.id && !i.descuento);
+      const idx = carrito.items.findIndex(i => i.producto_id === prod.id && !i.descuento && i.unidad !== 'kg');
       if (idx >= 0) carrito.items[idx].cantidad += cantidad;
       else carrito.items.push({ producto_id: prod.id, nombre: prod.nombre, codigo: prod.codigos?.[0]?.codigo || prod.codigo_interno || '', precio: prod.precio_venta,
-        cantidad, descuento: 0, stock: prod.stock_actual, tarifa: prod.tarifa_pct });
-      sel.value = idx >= 0 ? idx : carrito.items.length - 1; flash.value = sel.value; setTimeout(() => { flash.value = -1; }, 600);
-      const it = carrito.items[sel.value];
-      if (it.stock < it.cantidad) toast(`Stock en sistema de «${it.nombre}»: ${it.stock}. Revise el inventario.`, 'warn', 3500);
+        unidad: 'u', cantidad, descuento: 0, stock: prod.stock_actual, tarifa: prod.tarifa_pct });
+      avisarLinea(idx >= 0 ? idx : carrito.items.length - 1);
+    }
+    function avisarLinea(i) {
+      sel.value = i; flash.value = i; setTimeout(() => { flash.value = -1; }, 600);
+      const it = carrito.items[i];
+      if (it.stock < it.cantidad) toast(`Stock en sistema de «${it.nombre}»: ${conUnidad(it.stock, it.unidad)}. Revise el inventario.`, 'warn', 3500);
       beep('ok');
       nextTick(() => document.querySelector('.cart tr.sel')?.scrollIntoView({ block: 'nearest' }));
+    }
+    // Producto por peso: cada pesada es una línea (como los tiquetes de la balanza)
+    function agregarPeso(prod, { cantidad, valor }) {
+      carrito.items.push({ producto_id: prod.id, nombre: prod.nombre, codigo: prod.codigo_interno || prod.codigos?.[0]?.codigo || '', precio: prod.precio_venta,
+        unidad: 'kg', cantidad, valor: valor || null, descuento: 0, stock: prod.stock_actual, tarifa: prod.tarifa_pct });
+      avisarLinea(carrito.items.length - 1);
+    }
+    // Un solo camino para todo producto que llega (lector, búsqueda, botones rápidos, creación):
+    // por unidad se agrega directo; por peso se pide el peso (salvo que ya se escribió, p. ej. «1,25*101»).
+    function elegirProducto(prod, cant = null, porCodigo = 1) {
+      cantPend.value = 1; explicita.value = false;
+      if (prod.unidad === 'kg') {
+        if (cant) agregarPeso(prod, { cantidad: Math.round(cant * 1000) / 1000, valor: null });
+        else { pesoProd.value = prod; pesoIdx.value = -1; dlg.value = 'peso'; }
+      } else if (cant && !Number.isInteger(cant)) {
+        beep('error'); toast(`«${prod.nombre}» se vende por unidad: use un número entero.`, 'warn');
+      } else agregar(prod, (cant || 1) * porCodigo);
+    }
+    function aceptarPeso(r) {
+      if (pesoIdx.value >= 0) {
+        const it = carrito.items[pesoIdx.value];
+        it.cantidad = r.cantidad; it.valor = r.valor;
+        if (it.descuento > bruta(it)) it.descuento = 0;
+        recalcDescGlobal(); avisarLinea(pesoIdx.value);
+      } else agregarPeso(pesoProd.value, r);
+      dlg.value = null;
     }
 
     async function alEscanear() {
       let txt = scan.value.trim(); scan.value = '';
       if (!txt) return;
-      let m = txt.match(/^(\d{1,3})\s*[*xX]\s*$/);                       // "6*" → cantidad para el siguiente
-      if (m) { cantPend.value = parseInt(m[1], 10); return; }
-      m = txt.match(/^(\d{1,3})\s*[*xX]\s*(.+)$/);                       // "6*7701234" → cantidad + código
-      let cant = cantPend.value;
-      if (m) { cant = parseInt(m[1], 10); txt = m[2]; }
+      const num = t => parseFloat(t.replace(',', '.'));
+      let m = txt.match(/^(\d{1,3}(?:[.,]\d{1,3})?)\s*[*xX]\s*$/);        // "6*" → cantidad para el siguiente ("1,25*" → 1,25 kg)
+      if (m) { cantPend.value = num(m[1]); explicita.value = true; return; }
+      m = txt.match(/^(\d{1,3}(?:[.,]\d{1,3})?)\s*[*xX]\s*(.+)$/);        // "6*7701234" → cantidad + código
+      let cant = explicita.value ? cantPend.value : null;
+      if (m) { cant = num(m[1]); txt = m[2]; }
       if (!/^[\w-]+$/.test(txt) || !/\d/.test(txt)) { buscarInicial.value = txt; dlg.value = 'buscar'; return; }   // texto: buscar por nombre
       ocupado.value = true;
       try {
         const prod = await api.get('/api/productos/codigo/' + encodeURIComponent(txt));
-        agregar(prod, cant * (prod.unidades_por_codigo || 1)); cantPend.value = 1;
+        elegirProducto(prod, cant, prod.unidades_por_codigo || 1);
       } catch (e) {
-        beep('error');
+        beep('error'); cantPend.value = 1; explicita.value = false;
         if (e.codigo === 'CODIGO_NO_EXISTE' && esAdmin()) { codigoNuevo.value = txt; dlg.value = 'rapido'; }
         else errorToast(e);
       } finally { ocupado.value = false; enfocar(); }
     }
 
-    function cambiarCant(i, d) { const it = carrito.items[i]; if (!it) return; it.cantidad = Math.max(1, it.cantidad + d); if (it.descuento > it.precio * it.cantidad) it.descuento = 0; recalcDescGlobal(); }
+    function cambiarCant(i, d) {
+      const it = carrito.items[i]; if (!it || it.unidad === 'kg') return;   // el peso se corrige con F3, no de uno en uno
+      it.cantidad = Math.max(1, it.cantidad + d); if (it.descuento > bruta(it)) it.descuento = 0; recalcDescGlobal();
+    }
     async function quitar(i = sel.value) {
       const it = carrito.items[i]; if (!it) return;
       if (store.config.exigir_pin_quitar_linea === '1' && !esAdmin()) {
@@ -453,7 +563,9 @@ export const Caja = {
     }
     async function cobrar(pagos) {
       try {
-        const v = await api.post('/api/ventas', { items: carrito.items.map(i => ({ producto_id: i.producto_id, cantidad: i.cantidad, descuento: i.descuento || 0 })),
+        const v = await api.post('/api/ventas', { items: carrito.items.map(i => (i.valor
+            ? { producto_id: i.producto_id, valor: i.valor, descuento: i.descuento || 0 }
+            : { producto_id: i.producto_id, cantidad: i.cantidad, descuento: i.descuento || 0 })),
           pagos, descuento_global: carrito.descuentoGlobal });
         beep('cobro'); ventaOk.value = v; dlg.value = 'resultado';
         carrito.items = []; carrito.descuentoGlobal = 0; sel.value = -1; cantPend.value = 1;
@@ -479,13 +591,18 @@ export const Caja = {
     function abrirSuspender() { if (!carrito.items.length) return toast('No hay productos para suspender.', 'warn'); dlg.value = 'etiqueta'; }
     function abrirRetomar() { if (carrito.items.length) return toast('Termine o suspenda la venta actual antes de retomar otra.', 'warn'); dlg.value = 'suspendidas'; }
     function abrirDescuento() { if (!carrito.items.length) return; dlg.value = 'descuento'; }
-    function abrirCantidad() { if (itemSel.value) dlg.value = 'cantidad'; }
+    function abrirCantidad() {
+      const it = itemSel.value; if (!it) return;
+      if (it.unidad === 'kg') { pesoProd.value = { id: it.producto_id, nombre: it.nombre, precio_venta: it.precio, stock_actual: it.stock, unidad: 'kg' }; pesoIdx.value = sel.value; dlg.value = 'peso'; }
+      else dlg.value = 'cantidad';
+    }
+    function abrirRapidos() { if (!hayTurno.value) return toast('Primero abra la caja.', 'warn'); dlg.value = 'rapidos'; }
 
     // ── teclado
     function tecla(e) {
       if (document.querySelector('.overlay') || store.bloqueado) return;
       const k = e.key;
-      const mapa = { F2: () => { buscarInicial.value = ''; dlg.value = 'buscar'; }, F3: abrirCantidad, F4: () => quitar(), F5: abrirDescuento, F6: abrirSuspender,
+      const mapa = { F1: abrirRapidos, F2: () => { buscarInicial.value = ''; dlg.value = 'buscar'; }, F3: abrirCantidad, F4: () => quitar(), F5: abrirDescuento, F6: abrirSuspender,
         F7: abrirRetomar, F8: () => { dlg.value = 'ventas'; }, F12: () => { dlg.value = 'mov'; }, F9: () => abrirCobro('efectivo'), F10: () => abrirCobro('banco'), F11: () => abrirCobro('mixto'), Escape: cancelarVenta };
       if (mapa[k]) { e.preventDefault(); mapa[k](); return; }
       if (!scan.value) {
@@ -500,12 +617,14 @@ export const Caja = {
     onMounted(() => { window.addEventListener('keydown', tecla); window.addEventListener('click', clicGlobal); refrescarTurno(); enfocar(); });
     onBeforeUnmount(() => { window.removeEventListener('keydown', tecla); window.removeEventListener('click', clicGlobal); });
 
-    return { store, carrito, scan, sel, cantPend, flash, dlg, modoCobro, ventaOk, buscarInicial, codigoNuevo, inScan, ocupado, bruto, descLineas, total, unidades, itemSel, hayTurno,
-      alEscanear, agregar, cambiarCant, quitar, cancelarVenta, aplicarDescuento, abrirCobro, cobrar, suspender, retomar, abrirSuspender, abrirRetomar, abrirDescuento, abrirCantidad,
+    return { store, carrito, scan, sel, cantPend, explicita, pesoProd, pesoIdx, flash, dlg, modoCobro, ventaOk, buscarInicial, codigoNuevo, inScan, ocupado, bruto, descLineas, total, unidades, itemSel, hayTurno,
+      alEscanear, agregar, elegirProducto, aceptarPeso, abrirRapidos, kilos, cantidadTxt, bruta, cambiarCant, quitar, cancelarVenta, aplicarDescuento, abrirCobro, cobrar, suspender, retomar, abrirSuspender, abrirRetomar, abrirDescuento, abrirCantidad,
       peso, miles, enfocar, verRecibo: () => { verPdf('Recibo ' + ventaOk.value.numero, `/api/ventas/${ventaOk.value.id}/recibo`); },
-      ir: h => { location.hash = h; }, elegirBusqueda: p => { dlg.value = null; agregar(p, cantPend.value); cantPend.value = 1; },
-      cantidadNueva: v => { itemSel.value.cantidad = v; recalcDescGlobal(); dlg.value = null; },
-      creado: p => { dlg.value = null; agregar(p, cantPend.value); cantPend.value = 1; toast('Producto creado.', 'ok'); } };
+      ir: h => { location.hash = h; },
+      elegirBusqueda: p => { dlg.value = null; elegirProducto(p, explicita.value ? cantPend.value : null); },
+      elegirRapido: p => { dlg.value = null; elegirProducto(p); },
+      cantidadNueva: v => { itemSel.value.cantidad = v; if (itemSel.value.descuento > bruta(itemSel.value)) itemSel.value.descuento = 0; recalcDescGlobal(); dlg.value = null; },
+      creado: p => { dlg.value = null; elegirProducto(p, explicita.value ? cantPend.value : null); toast('Producto creado.', 'ok'); } };
   },
   template: `
     <div class="page nopad">
@@ -521,7 +640,7 @@ export const Caja = {
             <Icono n="barras"/>
             <input ref="inScan" class="input lg" v-model="scan" @keydown.enter.prevent="alEscanear" autocomplete="off" spellcheck="false"
                    placeholder="Escanee el código de barras o escriba el nombre…" :disabled="ocupado">
-            <span class="qty chip accent" v-if="cantPend > 1">× {{ cantPend }}</span>
+            <span class="qty chip accent" v-if="explicita">× {{ cantidadTxt(cantPend) }}</span>
           </div>
           <div class="cart">
             <table class="t" v-if="carrito.items.length">
@@ -530,14 +649,16 @@ export const Caja = {
                 <tr v-for="(it, i) in carrito.items" :key="it.producto_id + '-' + i" class="clickable" :class="{ sel: i === sel, flash: i === flash }" @click="sel = i">
                   <td class="muted">{{ i + 1 }}</td>
                   <td><b>{{ it.nombre }}</b><div class="xs muted">{{ it.codigo }}<span v-if="it.descuento" class="danger"> · desc. {{ peso(it.descuento) }}</span></div></td>
-                  <td class="center"><span class="qtybox"><button @click.stop="cambiarCant(i, -1)" tabindex="-1">−</button><b>{{ it.cantidad }}</b><button @click.stop="cambiarCant(i, 1)" tabindex="-1">+</button></span></td>
-                  <td class="num">{{ peso(it.precio) }}</td>
-                  <td class="num"><b>{{ peso(it.precio * it.cantidad - (it.descuento || 0)) }}</b></td>
+                  <td class="center">
+                    <span v-if="it.unidad === 'kg'" class="qtybox kg" @click.stop="sel = i; abrirCantidad()" title="Corregir el peso (F3)"><b>{{ kilos(it.cantidad) }}</b><button tabindex="-1"><Icono n="lapiz"/></button></span>
+                    <span v-else class="qtybox"><button @click.stop="cambiarCant(i, -1)" tabindex="-1">−</button><b>{{ it.cantidad }}</b><button @click.stop="cambiarCant(i, 1)" tabindex="-1">+</button></span></td>
+                  <td class="num">{{ peso(it.precio) }}<span v-if="it.unidad === 'kg'" class="xs muted"> /kg</span></td>
+                  <td class="num"><b>{{ peso(bruta(it) - (it.descuento || 0)) }}</b><div class="xs muted" v-if="it.valor">por valor</div></td>
                   <td><button class="btn sm ghost icon" @click.stop="quitar(i)" tabindex="-1" title="Quitar (Supr)"><Icono n="x"/></button></td>
                 </tr>
               </tbody>
             </table>
-            <div v-else class="cart-empty"><div><Icono n="barras" class="ico xl" style="margin:0 auto 10px"/><h3>Listo para vender</h3><p class="small" style="margin-top:6px">Escanee un producto para comenzar.<br>Use <b>6*</b> y luego escanee para agregar 6 unidades.</p></div></div>
+            <div v-else class="cart-empty"><div><Icono n="barras" class="ico xl" style="margin:0 auto 10px"/><h3>Listo para vender</h3><p class="small" style="margin-top:6px">Escanee un producto para comenzar.<br>Use <b>6*</b> y luego escanee para agregar 6 unidades.<br>Verduras y frutas: <b>F1</b>, o escriba el código corto.</p></div></div>
           </div>
         </section>
 
@@ -553,9 +674,10 @@ export const Caja = {
             <button class="btn" @click="abrirCobro('banco')"><span><Icono n="tarjeta" class="ico lg"/> Banco / datáfono</span><span class="kbd">F10</span></button>
             <button class="btn" @click="abrirCobro('mixto')"><span><Icono n="porcentaje" class="ico lg"/> Pago mixto</span><span class="kbd">F11</span></button>
           </div>
+          <button class="btn lg" @click="abrirRapidos" style="justify-content:space-between"><span style="display:inline-flex;align-items:center;gap:10px"><Icono n="etiqueta"/> Verduras y frutas (por peso)</span><span class="kbd">F1</span></button>
           <div class="shortcuts">
             <button class="btn" @click="dlg = 'buscar'"><Icono n="buscar"/> Buscar <span class="kbd">F2</span></button>
-            <button class="btn" @click="abrirCantidad" :disabled="!itemSel"><Icono n="lapiz"/> Cantidad <span class="kbd">F3</span></button>
+            <button class="btn" @click="abrirCantidad" :disabled="!itemSel"><Icono n="lapiz"/> Cantidad / peso <span class="kbd">F3</span></button>
             <button class="btn" @click="abrirDescuento" :disabled="!carrito.items.length"><Icono n="porcentaje"/> Descuento <span class="kbd">F5</span></button>
             <button class="btn" @click="quitar()" :disabled="!itemSel"><Icono n="basura"/> Quitar <span class="kbd">F4</span></button>
             <button class="btn" @click="abrirSuspender" :disabled="!carrito.items.length"><Icono n="pausa"/> Suspender <span class="kbd">F6</span></button>
@@ -566,12 +688,14 @@ export const Caja = {
           </div>
         </aside>
       </div>
-      <div class="keybar"><span><b>Enter</b> agregar</span><span><b>6*</b> cantidad</span><span><b>↑ ↓</b> elegir línea</span><span><b>+ / −</b> cantidad</span><span><b>Supr</b> quitar</span></div>
+      <div class="keybar"><span><b>Enter</b> agregar</span><span><b>6*</b> cantidad</span><span><b>1,25*</b> kilos</span><span><b>F1</b> verduras</span><span><b>↑ ↓</b> elegir línea</span><span><b>+ / −</b> cantidad</span><span><b>Supr</b> quitar</span></div>
       </template>
 
       <Cobro v-if="dlg === 'cobro'" :total="total" :modo-inicial="modoCobro" @cerrar="dlg = null" @confirmar="cobrar"/>
       <Resultado v-if="dlg === 'resultado'" :venta="ventaOk" @cerrar="dlg = null" @recibo="verRecibo"/>
       <Buscador v-if="dlg === 'buscar'" :inicial="buscarInicial" @cerrar="dlg = null" @elegir="elegirBusqueda"/>
+      <ModalRapidos v-if="dlg === 'rapidos'" @cerrar="dlg = null" @elegir="elegirRapido"/>
+      <ModalPeso v-if="dlg === 'peso' && pesoProd" :prod="pesoProd" :inicial="pesoIdx >= 0 ? carrito.items[pesoIdx] : null" @cerrar="dlg = null" @aceptar="aceptarPeso"/>
       <ModalCantidad v-if="dlg === 'cantidad' && itemSel" :item="itemSel" @cerrar="dlg = null" @aceptar="cantidadNueva"/>
       <ModalDescuento v-if="dlg === 'descuento'" :item="itemSel" :bruto="bruto - descLineas" @cerrar="dlg = null" @aplicar="aplicarDescuento"/>
       <ModalEtiqueta v-if="dlg === 'etiqueta'" @cerrar="dlg = null" @aceptar="suspender"/>

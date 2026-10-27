@@ -7,7 +7,8 @@ from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from .. import models as m
-from ..core import ErrorNegocio, ahora, auditar, cfg_bool, hoy, redondear
+from ..core import ErrorNegocio, ahora, auditar, cant, cfg_bool, hoy, redondear
+from . import unidades
 
 TIPOS_MOVIMIENTO = {
     "VENTA": "Venta", "ANULACION_VENTA": "Anulación de venta", "DEVOLUCION_VENTA": "Devolución de venta",
@@ -18,13 +19,14 @@ MOTIVOS_MERMA = {"VENCIDO": "Vencido", "DANADO": "Dañado", "ROBO": "Robo / pér
                  "CONSUMO_INTERNO": "Consumo interno", "OTRO": "Otro"}
 
 
-def registrar_movimiento(db: Session, producto: m.Producto, tipo: str, cantidad: int, *,
+def registrar_movimiento(db: Session, producto: m.Producto, tipo: str, cantidad: int | float, *,
                          costo_unitario: float | None = None, referencia_tipo: str | None = None,
                          referencia_id: int | None = None, usuario_id: int | None = None,
                          motivo: str | None = None, nota: str | None = None,
                          fecha: datetime | None = None) -> m.MovimientoInventario:
     """Aplica `cantidad` (con signo) al stock y deja el rastro en el kardex, en la misma transacción."""
-    producto.stock_actual += cantidad
+    cantidad = cant(cantidad)
+    producto.stock_actual = cant(producto.stock_actual + cantidad)
     producto.actualizado_en = ahora()
     mov = m.MovimientoInventario(
         producto_id=producto.id, fecha=fecha or ahora(), tipo=tipo, cantidad=cantidad,
@@ -35,14 +37,14 @@ def registrar_movimiento(db: Session, producto: m.Producto, tipo: str, cantidad:
     return mov
 
 
-def verificar_stock(db: Session, producto: m.Producto, cantidad_a_sacar: int):
+def verificar_stock(db: Session, producto: m.Producto, cantidad_a_sacar: int | float):
     if cantidad_a_sacar > 0 and not cfg_bool(db, "permitir_stock_negativo") \
             and producto.stock_actual < cantidad_a_sacar:
-        raise ErrorNegocio(f"Stock insuficiente de «{producto.nombre}»: hay {producto.stock_actual}, "
-                           f"se piden {cantidad_a_sacar}.", 409, "STOCK_INSUFICIENTE")
+        raise ErrorNegocio(f"Stock insuficiente de «{producto.nombre}»: hay {unidades.texto(producto.unidad, producto.stock_actual)}, "
+                           f"se piden {unidades.texto(producto.unidad, cantidad_a_sacar)}.", 409, "STOCK_INSUFICIENTE")
 
 
-def aplicar_compra_a_costo(producto: m.Producto, cantidad: int, costo_compra: float):
+def aplicar_compra_a_costo(producto: m.Producto, cantidad: int | float, costo_compra: float):
     """Costo promedio ponderado. Si el stock era <= 0, el costo pasa a ser el de la compra."""
     if producto.stock_actual <= 0:
         producto.costo_promedio = costo_compra
@@ -52,28 +54,30 @@ def aplicar_compra_a_costo(producto: m.Producto, cantidad: int, costo_compra: fl
                                    + cantidad * costo_compra) / total
 
 
-def registrar_merma(db: Session, usuario: m.Usuario, producto_id: int, cantidad: int, motivo: str,
+def registrar_merma(db: Session, usuario: m.Usuario, producto_id: int, cantidad: int | float, motivo: str,
                     nota: str | None = None) -> m.MovimientoInventario:
-    if cantidad <= 0:
-        raise ErrorNegocio("La cantidad de la merma debe ser mayor a cero.")
     if motivo not in MOTIVOS_MERMA:
         raise ErrorNegocio("Motivo de merma no válido.")
     p = db.get(m.Producto, producto_id)
     if not p:
         raise ErrorNegocio("Producto no encontrado.", 404)
+    cantidad = unidades.normalizar(p, cantidad)
     mov = registrar_movimiento(db, p, "MERMA", -cantidad, usuario_id=usuario.id, motivo=motivo, nota=nota)
     auditar(db, usuario.id, "MERMA", "producto", p.id, despues={"cantidad": cantidad, "motivo": motivo})
     return mov
 
 
-def ajustar_stock(db: Session, usuario: m.Usuario, producto_id: int, *, nuevo_stock: int | None = None,
-                  delta: int | None = None, nota: str | None = None) -> m.MovimientoInventario | None:
+def ajustar_stock(db: Session, usuario: m.Usuario, producto_id: int, *, nuevo_stock: int | float | None = None,
+                  delta: int | float | None = None, nota: str | None = None) -> m.MovimientoInventario | None:
     p = db.get(m.Producto, producto_id)
     if not p:
         raise ErrorNegocio("Producto no encontrado.", 404)
     if (nuevo_stock is None) == (delta is None):
         raise ErrorNegocio("Indique el nuevo stock o la diferencia, pero no ambos.")
-    d = (nuevo_stock - p.stock_actual) if nuevo_stock is not None else delta
+    if nuevo_stock is not None:
+        d = cant(unidades.normalizar(p, nuevo_stock, permitir_cero=True, permitir_negativo=True) - p.stock_actual)
+    else:
+        d = unidades.normalizar(p, delta, permitir_cero=True, permitir_negativo=True)
     if d == 0:
         return None
     if not nota or not nota.strip():
@@ -85,19 +89,19 @@ def ajustar_stock(db: Session, usuario: m.Usuario, producto_id: int, *, nuevo_st
     return mov
 
 
-def saldo_inicial(db: Session, usuario_id: int | None, producto: m.Producto, cantidad: int, costo: float):
+def saldo_inicial(db: Session, usuario_id: int | None, producto: m.Producto, cantidad: int | float, costo: float):
     if cantidad:
         registrar_movimiento(db, producto, "SALDO_INICIAL", cantidad, costo_unitario=costo,
                              usuario_id=usuario_id, nota="Saldo inicial")
 
 
 # ───────────────────────────── Consultas ─────────────────────────────
-def stock_en(db: Session, producto_id: int, momento: datetime) -> int:
+def stock_en(db: Session, producto_id: int, momento: datetime) -> int | float:
     """Stock que tenía el producto en `momento` (stock actual menos lo movido después)."""
     actual = db.scalar(select(m.Producto.stock_actual).where(m.Producto.id == producto_id)) or 0
     despues = db.scalar(select(func.coalesce(func.sum(m.MovimientoInventario.cantidad), 0)).where(
         m.MovimientoInventario.producto_id == producto_id, m.MovimientoInventario.fecha > momento)) or 0
-    return actual - despues
+    return cant(actual - despues)
 
 
 def kardex(db: Session, producto_id: int, desde: date | None = None, hasta: date | None = None,
@@ -120,10 +124,10 @@ def kardex(db: Session, producto_id: int, desde: date | None = None, hasta: date
 
 def alertas(db: Session) -> dict:
     base = select(m.Producto.id, m.Producto.nombre, m.Producto.stock_actual, m.Producto.stock_minimo,
-                  m.Producto.costo_promedio).where(m.Producto.activo.is_(True))
+                  m.Producto.unidad).where(m.Producto.activo.is_(True))
 
     def lista(cond, orden):
-        return [{"id": i, "nombre": n, "stock": s, "minimo": mn} for i, n, s, mn, _ in
+        return [{"id": i, "nombre": n, "stock": s, "minimo": mn, "unidad": u} for i, n, s, mn, u in
                 db.execute(base.where(cond).order_by(orden).limit(200))]
 
     agotados = lista((m.Producto.stock_actual == 0) & (m.Producto.stock_minimo > 0), m.Producto.nombre)

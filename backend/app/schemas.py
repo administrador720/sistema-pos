@@ -1,6 +1,8 @@
 """Esquemas de entrada (validación). Las respuestas son diccionarios construidos por los servicios."""
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -111,9 +113,11 @@ class ProductoIn(Base):
     impuesto_id: int | None = None
     costo_promedio: float | None = None
     precio_venta: int | None = None
-    stock_minimo: int | None = None
-    stock_maximo: int | None = None
-    stock_inicial: int | None = None
+    unidad: Literal["u", "kg"] | None = None  # u = por unidad, kg = por peso (el precio es por kilo)
+    rapido: bool | None = None  # botón de acceso rápido en la caja
+    stock_minimo: float | None = None
+    stock_maximo: float | None = None
+    stock_inicial: float | None = None
     ubicacion: str | None = None
     activo: bool | None = None
     codigos: list[CodigoIn] | None = None
@@ -156,7 +160,8 @@ class CajonIn(Base):
 
 class ItemVentaIn(Base):
     producto_id: int
-    cantidad: int
+    cantidad: float | None = None  # unidades, o kilos en productos por peso
+    valor: int | None = None  # solo productos por peso: «$5.000 de tomate» (la cantidad se calcula con el precio)
     descuento: int = 0
 
 
@@ -180,7 +185,7 @@ class AnularIn(Base):
 
 class ItemDevolucionIn(Base):
     venta_item_id: int
-    cantidad: int
+    cantidad: float
     danado: bool = False
 
 
@@ -197,21 +202,21 @@ class SuspenderIn(Base):
 
 class MermaIn(Base):
     producto_id: int
-    cantidad: int
+    cantidad: float
     motivo: str
     nota: str | None = None
 
 
 class AjusteIn(Base):
     producto_id: int
-    nuevo_stock: int | None = None
-    delta: int | None = None
+    nuevo_stock: float | None = None
+    delta: float | None = None
     nota: str
 
 
 class ItemCompraIn(Base):
     producto_id: int
-    cantidad: int
+    cantidad: float
     costo_unitario: float
     nuevo_precio: int | None = None
 
@@ -243,7 +248,7 @@ class ConteoIn(Base):
 class CapturaIn(Base):
     codigo: str | None = None
     producto_id: int | None = None
-    cantidad: int
+    cantidad: float
     ubicacion: str | None = None
 
 

@@ -1,7 +1,7 @@
 // Productos: lista, editor (códigos de barras, precios, kardex), importación desde Excel y precios masivos
 import { api, query } from '../api.js';
 import { store, errorToast, toast, pedirTexto, confirmar } from '../store.js';
-import { peso, entero, decimal, fechaHora, porcentaje, debounce, descargarBlob } from '../util.js';
+import { peso, entero, decimal, fechaHora, porcentaje, debounce, descargarBlob, cantidadTxt, conUnidad } from '../util.js';
 
 const { ref, reactive, computed, onMounted, watch, nextTick } = Vue;
 
@@ -18,7 +18,8 @@ const Editor = {
   setup(p, { emit }) {
     const nuevo = !p.id;
     const f = reactive({ nombre: '', codigo_interno: '', marca: '', categoria_id: null, proveedor_id: null, impuesto_id: null, costo_promedio: 0,
-      precio_venta: null, stock_minimo: 0, stock_maximo: 0, stock_inicial: null, ubicacion: '', activo: true, codigos: [] });
+      precio_venta: null, unidad: 'u', rapido: false, stock_minimo: 0, stock_maximo: 0, stock_inicial: null, ubicacion: '', activo: true, codigos: [] });
+    const porPeso = computed(() => f.unidad === 'kg');
     const tab = ref('datos'), cargando = ref(!nuevo), guardando = ref(false);
     const codigoNuevo = ref(''), unidadesNuevo = ref(1), historial = ref(null), kardex = ref(null), stockActual = ref(0);
     const tarifa = computed(() => store.cat.impuestos.find(i => i.id === f.impuesto_id)?.tarifa_pct || 0);
@@ -34,7 +35,7 @@ const Editor = {
       try {
         const d = await api.get('/api/productos/' + p.id);
         Object.assign(f, { nombre: d.nombre, codigo_interno: d.codigo_interno || '', marca: d.marca || '', categoria_id: d.categoria_id, proveedor_id: d.proveedor_id,
-          impuesto_id: d.impuesto_id, costo_promedio: d.costo_promedio, precio_venta: d.precio_venta, stock_minimo: d.stock_minimo, stock_maximo: d.stock_maximo,
+          impuesto_id: d.impuesto_id, costo_promedio: d.costo_promedio, precio_venta: d.precio_venta, unidad: d.unidad || 'u', rapido: !!d.rapido, stock_minimo: d.stock_minimo, stock_maximo: d.stock_maximo,
           ubicacion: d.ubicacion || '', activo: d.activo, codigos: d.codigos.map(c => ({ ...c })) });
         stockActual.value = d.stock_actual;
       } catch (e) { errorToast(e); emit('cerrar'); }
@@ -70,8 +71,8 @@ const Editor = {
         toast(nuevo ? 'Producto creado.' : 'Producto guardado.', 'ok'); emit('guardado');
       } catch (e) { errorToast(e); } finally { guardando.value = false; }
     }
-    return { nuevo, f, tab, cargando, guardando, store, codigoNuevo, unidadesNuevo, historial, kardex, stockActual, margen, tarifa, inNombre, inCodigo,
-      agregarCodigo, nuevaCategoria, nuevoProveedor, guardar, peso, entero, decimal, fechaHora, porcentaje };
+    return { nuevo, f, porPeso, tab, cargando, guardando, store, codigoNuevo, unidadesNuevo, historial, kardex, stockActual, margen, tarifa, inNombre, inCodigo,
+      agregarCodigo, nuevaCategoria, nuevoProveedor, guardar, peso, entero, decimal, fechaHora, porcentaje, cantidadTxt, conUnidad };
   },
   template: `
     <Modal :titulo="nuevo ? 'Producto nuevo' : 'Editar producto'" ancho="lg" @cerrar="$emit('cerrar')">
@@ -82,11 +83,17 @@ const Editor = {
           <button :class="{ on: tab === 'kardex' }" @click="tab = 'kardex'">Movimientos (kardex)</button></div>
 
         <div v-show="tab === 'datos'" class="stack">
-          <div class="grid" style="grid-template-columns:2fr 1fr 1fr">
-            <div class="field"><label>Nombre *</label><input ref="inNombre" class="input" v-model="f.nombre"></div>
-            <div class="field"><label>Marca</label><input class="input" v-model="f.marca"></div>
-            <div class="field"><label>Código interno</label><input class="input" v-model="f.codigo_interno"></div>
+          <div class="row wrap">
+            <div class="seg"><button :class="{ on: !porPeso }" @click="f.unidad = 'u'">Se vende por unidad</button><button :class="{ on: porPeso }" @click="f.unidad = 'kg'">Se vende por peso (kg)</button></div>
+            <span class="hint" v-if="porPeso">Verduras, frutas, carnes sueltas… El precio y el costo son <b>por kilo</b>; el cajero escribe el peso de la balanza.</span>
           </div>
+          <div class="grid" style="grid-template-columns:2fr 1fr 1fr">
+            <div class="field"><label>Nombre *</label><input ref="inNombre" class="input" v-model="f.nombre" :placeholder="porPeso ? 'Ej.: Tomate chonto' : ''"></div>
+            <div class="field"><label>Marca</label><input class="input" v-model="f.marca"></div>
+            <div class="field"><label>{{ porPeso ? 'Código corto (PLU)' : 'Código interno' }}</label><input class="input" v-model="f.codigo_interno" :placeholder="porPeso ? 'Ej.: 101' : ''">
+              <span class="hint" v-if="porPeso">El cajero lo escribe en la caja para encontrarlo rápido.</span></div>
+          </div>
+          <label class="check" v-if="porPeso"><input type="checkbox" v-model="f.rapido"> Botón rápido en la caja (aparece en «Verduras y frutas», tecla F1)</label>
           <div class="grid c3">
             <div class="field"><label>Categoría</label><div class="row"><select class="input" v-model="f.categoria_id"><option :value="null">Sin categoría</option>
               <option v-for="c in store.cat.categorias" :key="c.id" :value="c.id">{{ c.nombre }}</option></select><button class="btn icon" @click="nuevaCategoria" title="Nueva categoría"><Icono n="mas"/></button></div></div>
@@ -95,25 +102,28 @@ const Editor = {
             <div class="field"><label>Impuesto (incluido en el precio)</label><select class="input" v-model="f.impuesto_id"><option v-for="i in store.cat.impuestos" :key="i.id" :value="i.id">{{ i.nombre }}</option></select></div>
           </div>
           <div class="grid c4">
-            <div class="field"><label>Precio de venta</label><InputDinero v-model="f.precio_venta"/></div>
-            <div class="field"><label>Costo {{ nuevo ? '' : '(promedio)' }}</label><input class="input num" type="number" min="0" step="0.01" v-model.number="f.costo_promedio"></div>
+            <div class="field"><label>{{ porPeso ? 'Precio por kilo' : 'Precio de venta' }}</label><InputDinero v-model="f.precio_venta"/></div>
+            <div class="field"><label>{{ porPeso ? 'Costo por kilo' : 'Costo' }} {{ nuevo ? '' : '(promedio)' }}</label><input class="input num" type="number" min="0" step="0.01" v-model.number="f.costo_promedio"></div>
             <div class="field"><label>Margen bruto</label><div class="input row" style="background:var(--surface-2)" :class="margen !== null && margen < 0 ? 'danger' : ''">
               <b class="num">{{ margen === null ? '—' : porcentaje(margen) }}</b><span class="xs muted">sobre precio sin impuesto</span></div></div>
-            <div class="field" v-if="nuevo"><label>Existencias iniciales</label><InputDinero v-model="f.stock_inicial" placeholder="0"/></div>
-            <div class="field" v-else><label>Existencias actuales</label><div class="input row" style="background:var(--surface-2)"><b class="num">{{ entero(stockActual) }}</b><span class="xs muted">cambian con compras, ventas y conteos</span></div></div>
+            <div class="field" v-if="nuevo"><label>Existencias iniciales{{ porPeso ? ' (kg)' : '' }}</label>
+              <InputPeso v-if="porPeso" v-model="f.stock_inicial" placeholder="0"/><InputDinero v-else v-model="f.stock_inicial" placeholder="0"/></div>
+            <div class="field" v-else><label>Existencias actuales</label><div class="input row" style="background:var(--surface-2)"><b class="num">{{ conUnidad(stockActual, f.unidad) }}</b><span class="xs muted">cambian con compras, ventas y conteos</span></div></div>
           </div>
           <div class="alert" v-if="margen !== null && margen < 0"><Icono n="alerta"/>El precio está por debajo del costo: cada venta pierde dinero.</div>
           <div class="grid c3">
-            <div class="field"><label>Stock mínimo (alerta)</label><input class="input num" type="number" min="0" v-model.number="f.stock_minimo"></div>
-            <div class="field"><label>Stock máximo</label><input class="input num" type="number" min="0" v-model.number="f.stock_maximo"></div>
+            <div class="field"><label>Stock mínimo (alerta){{ porPeso ? ' · kg' : '' }}</label>
+              <InputPeso v-if="porPeso" v-model="f.stock_minimo"/><input v-else class="input num" type="number" min="0" v-model.number="f.stock_minimo"></div>
+            <div class="field"><label>Stock máximo{{ porPeso ? ' · kg' : '' }}</label>
+              <InputPeso v-if="porPeso" v-model="f.stock_maximo"/><input v-else class="input num" type="number" min="0" v-model.number="f.stock_maximo"></div>
             <div class="field"><label>Ubicación (pasillo / góndola)</label><input class="input" v-model="f.ubicacion"></div>
           </div>
           <div class="card soft stack sm">
-            <div class="row between"><h3>Códigos de barras</h3><span class="hint">Un producto puede tener varios. Un código de paca puede valer varias unidades.</span></div>
+            <div class="row between"><h3>Códigos de barras{{ porPeso ? ' (opcional)' : '' }}</h3><span class="hint">{{ porPeso ? 'Por peso se vende con el código corto o los botones rápidos; el código de barras no es necesario.' : 'Un producto puede tener varios. Un código de paca puede valer varias unidades.' }}</span></div>
             <div class="row wrap"><span v-for="c in f.codigos" :key="c.codigo" class="chip accent" style="height:30px">
               <Icono n="barras"/> {{ c.codigo }}<b v-if="c.unidades > 1"> × {{ c.unidades }}</b>
               <button class="btn ghost icon sm" style="width:22px;height:22px" @click="f.codigos.splice(f.codigos.indexOf(c), 1)"><Icono n="x"/></button></span>
-              <span v-if="!f.codigos.length" class="muted small">Sin códigos: solo se podrá vender buscando por nombre.</span></div>
+              <span v-if="!f.codigos.length && !porPeso" class="muted small">Sin códigos: solo se podrá vender buscando por nombre.</span></div>
             <div class="row"><input ref="inCodigo" class="input" v-model="codigoNuevo" placeholder="Escanee o digite un código y presione Enter" @keydown.enter.prevent="agregarCodigo" style="flex:1">
               <input class="input num" type="number" min="1" v-model.number="unidadesNuevo" style="width:110px" title="Unidades que representa este código"><span class="muted small">unidades</span>
               <button class="btn" @click="agregarCodigo"><Icono n="mas"/> Agregar</button></div>
@@ -129,7 +139,7 @@ const Editor = {
         <div v-if="tab === 'kardex'">
           <div class="table-wrap" style="max-height:50vh"><table class="t compact" v-if="kardex"><thead><tr><th>Fecha</th><th>Movimiento</th><th class="num">Cantidad</th><th class="num">Costo</th><th class="num">Saldo</th><th>Usuario</th></tr></thead><tbody>
             <tr v-for="k in kardex" :key="k.id"><td>{{ fechaHora(k.fecha) }}</td><td>{{ k.tipo_nombre }}<span class="xs muted" v-if="k.nota"> · {{ k.nota }}</span></td>
-              <td class="num" :class="k.cantidad < 0 ? 'danger' : 'ok'">{{ k.cantidad > 0 ? '+' : '' }}{{ k.cantidad }}</td><td class="num">{{ decimal(k.costo_unitario) }}</td><td class="num"><b>{{ k.stock_resultante }}</b></td><td>{{ k.usuario }}</td></tr></tbody></table></div>
+              <td class="num" :class="k.cantidad < 0 ? 'danger' : 'ok'">{{ k.cantidad > 0 ? '+' : '' }}{{ cantidadTxt(k.cantidad) }}</td><td class="num">{{ decimal(k.costo_unitario) }}</td><td class="num"><b>{{ cantidadTxt(k.stock_resultante) }}</b></td><td>{{ k.usuario }}</td></tr></tbody></table></div>
         </div>
       </div>
       <template #pie>
@@ -243,7 +253,7 @@ export const Productos = {
     function mover(d) { pag.offset = Math.max(0, Math.min(pag.offset + d * pag.limite, datos.value.total - 1)); cargar(); }
     const editar = id => { editId.value = id; dlg.value = 'editor'; };
     const hecho = () => { dlg.value = null; cargar(); };
-    return { filtro, datos, cargando, dlg, editId, store, desde, hasta, mover, editar, hecho, cargar, peso, entero, decimal, porcentaje };
+    return { filtro, datos, cargando, dlg, editId, store, desde, hasta, mover, editar, hecho, cargar, peso, entero, decimal, porcentaje, cantidadTxt, conUnidad };
   },
   template: `
     <div class="page">
@@ -263,12 +273,12 @@ export const Productos = {
           <table class="t"><thead><tr><th>Producto</th><th>Código</th><th>Categoría</th><th class="num">Costo</th><th class="num">Precio</th><th class="num">Margen</th><th class="num">Stock</th><th class="num">Mín.</th><th>Estado</th></tr></thead>
             <tbody>
               <tr v-for="p in datos.productos" :key="p.id" class="clickable" @click="editar(p.id)">
-                <td><b>{{ p.nombre }}</b><div class="xs muted">{{ p.marca || '' }}{{ p.marca && p.ubicacion ? ' · ' : '' }}{{ p.ubicacion || '' }}</div></td>
-                <td class="muted small">{{ p.codigos[0] ? p.codigos[0].codigo : '—' }}<span v-if="p.codigos.length > 1" class="chip" style="margin-left:6px">+{{ p.codigos.length - 1 }}</span></td>
-                <td>{{ p.categoria || '—' }}</td><td class="num">{{ decimal(p.costo_promedio, 0) }}</td><td class="num"><b>{{ peso(p.precio_venta) }}</b></td>
+                <td><b>{{ p.nombre }}</b><span v-if="p.unidad === 'kg'" class="chip accent" style="margin-left:8px;height:20px">kg</span><span v-if="p.rapido" class="chip" style="margin-left:4px;height:20px" title="Botón rápido en la caja">F1</span><div class="xs muted">{{ p.marca || '' }}{{ p.marca && p.ubicacion ? ' · ' : '' }}{{ p.ubicacion || '' }}</div></td>
+                <td class="muted small">{{ p.codigos[0] ? p.codigos[0].codigo : (p.codigo_interno || '—') }}<span v-if="p.codigos.length > 1" class="chip" style="margin-left:6px">+{{ p.codigos.length - 1 }}</span></td>
+                <td>{{ p.categoria || '—' }}</td><td class="num">{{ decimal(p.costo_promedio, 0) }}</td><td class="num"><b>{{ peso(p.precio_venta) }}</b><span v-if="p.unidad === 'kg'" class="xs muted"> /kg</span></td>
                 <td class="num" :class="p.margen_pct !== null && p.margen_pct < 0 ? 'danger' : ''">{{ p.margen_pct === null ? '—' : porcentaje(p.margen_pct) }}</td>
-                <td class="num"><b :class="p.stock_actual < 0 ? 'danger' : p.stock_actual <= p.stock_minimo ? 'warn' : ''">{{ entero(p.stock_actual) }}</b></td>
-                <td class="num muted">{{ p.stock_minimo }}</td><td><span class="chip" :class="p.activo ? 'ok' : ''">{{ p.activo ? 'Activo' : 'Inactivo' }}</span></td>
+                <td class="num"><b :class="p.stock_actual < 0 ? 'danger' : p.stock_actual <= p.stock_minimo ? 'warn' : ''">{{ conUnidad(p.stock_actual, p.unidad) }}</b></td>
+                <td class="num muted">{{ cantidadTxt(p.stock_minimo) }}</td><td><span class="chip" :class="p.activo ? 'ok' : ''">{{ p.activo ? 'Activo' : 'Inactivo' }}</span></td>
               </tr>
               <tr v-if="!cargando && !datos.productos.length"><td colspan="9"><div class="empty"><Icono n="caja_prod" class="ico xl"/><div>No hay productos con estos filtros.</div></div></td></tr>
             </tbody></table>

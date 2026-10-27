@@ -14,6 +14,24 @@ export function decimal(n, d = 2) {
   if (n === null || n === undefined) return '';
   return Number(n).toLocaleString('es-CO', { minimumFractionDigits: d, maximumFractionDigits: d });
 }
+// Cantidades: 5 → «5», 1,25 → «1,25» (hasta 3 decimales, sin ceros de sobra)
+export function cantidadTxt(n) {
+  if (n === null || n === undefined || n === '') return '';
+  const v = Math.round(Number(n) * 1000) / 1000;
+  const [ent, dec] = Math.abs(v).toFixed(3).replace(/0+$/, '').replace(/\.$/, '').split('.');
+  return (v < 0 ? '-' : '') + miles(ent) + (dec ? ',' + dec : '');
+}
+// Kilos como los muestra una balanza: «1,250 kg»
+export function kilos(n) {
+  if (n === null || n === undefined || n === '') return '';
+  const v = Math.round(Number(n) * 1000) / 1000;
+  return (v < 0 ? '-' : '') + miles(Math.trunc(Math.abs(v))) + ',' + Math.abs(v).toFixed(3).split('.')[1] + ' kg';
+}
+export const conUnidad = (n, unidad) => unidad === 'kg' ? kilos(n) : cantidadTxt(n);
+// Precio × cantidad en pesos con aritmética entera (igual que el servidor): 0,350 kg × $3.500 = $1.225
+export function valorLinea(precio, cantidad) { return Math.floor((precio * Math.round(Number(cantidad) * 1000) + 500) / 1000); }
+// Valor bruto de una línea del carrito: lo digitado en pesos («$5.000 de tomate») o precio × cantidad
+export function bruta(it) { return it.valor ? it.valor : valorLinea(it.precio, it.cantidad); }
 export function porcentaje(n) { return n === null || n === undefined ? '—' : String(Number(n).toFixed(1)).replace('.', ',') + ' %'; }
 
 const pad = x => String(x).padStart(2, '0');
@@ -37,6 +55,7 @@ export function formatear(valor, tipo) {
   switch (tipo) {
     case 'dinero': return peso(valor);
     case 'entero': return entero(valor);
+    case 'cantidad': return cantidadTxt(valor);
     case 'decimal': return decimal(valor);
     case 'porcentaje': return porcentaje(valor);
     case 'fecha': return fecha(valor);
@@ -44,7 +63,7 @@ export function formatear(valor, tipo) {
     default: return String(valor);
   }
 }
-export const esNumerico = tipo => ['dinero', 'entero', 'decimal', 'porcentaje'].includes(tipo);
+export const esNumerico = tipo => ['dinero', 'entero', 'cantidad', 'decimal', 'porcentaje'].includes(tipo);
 
 // ── Sonidos (Web Audio: no necesita archivos)
 let ctx = null;

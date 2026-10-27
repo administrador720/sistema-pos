@@ -12,12 +12,13 @@ from sqlalchemy.orm import Session, selectinload
 from .. import models as m
 from ..core import ErrorNegocio, ahora, auditar, redondear
 from . import inventario as inv
+from . import unidades
 
 
 def serializar(p: m.Producto, *, completo: bool = True) -> dict:
     d = {
         "id": p.id, "codigo_interno": p.codigo_interno, "nombre": p.nombre, "precio_venta": p.precio_venta,
-        "stock_actual": p.stock_actual, "activo": p.activo, "categoria_id": p.categoria_id,
+        "unidad": p.unidad, "rapido": bool(p.rapido), "stock_actual": p.stock_actual, "activo": p.activo, "categoria_id": p.categoria_id,
         "categoria": p.categoria.nombre if p.categoria else None, "ubicacion": p.ubicacion,
         "impuesto_id": p.impuesto_id,
         "impuesto": p.impuesto.nombre if p.impuesto else None,
@@ -49,6 +50,13 @@ def por_codigo(db: Session, codigo: str) -> tuple[m.Producto, int] | None:
         return (p, 1) if p else None
     p = db.scalars(select(m.Producto).where(m.Producto.id == cb.producto_id).options(*_opciones())).one()
     return p, cb.unidades_por_codigo
+
+
+def rapidos(db: Session) -> list[dict]:
+    """Productos marcados como botón de acceso rápido (las verduras de todos los días), por nombre."""
+    return [serializar(p, completo=False) for p in db.scalars(
+        select(m.Producto).where(m.Producto.rapido.is_(True), m.Producto.activo.is_(True))
+        .options(*_opciones()).order_by(m.Producto.nombre))]
 
 
 def _normalizar(s: str) -> str:
@@ -87,9 +95,11 @@ def _validar(datos: dict, parcial: bool = False):
     if not parcial or "nombre" in datos:
         if not (datos.get("nombre") or "").strip():
             raise ErrorNegocio("El nombre del producto es obligatorio.")
-    for campo in ("precio_venta", "stock_minimo", "stock_maximo"):
-        if campo in datos and datos[campo] is not None and int(datos[campo]) < 0:
+    for campo in ("precio_venta", "stock_minimo", "stock_maximo", "stock_inicial"):
+        if campo in datos and datos[campo] is not None and float(datos[campo]) < 0:
             raise ErrorNegocio(f"{campo.replace('_', ' ').capitalize()} no puede ser negativo.")
+    if datos.get("unidad") not in (None, "u", "kg"):
+        raise ErrorNegocio("La unidad debe ser «u» (por unidad) o «kg» (por peso).")
     if "costo_promedio" in datos and datos["costo_promedio"] is not None and float(datos["costo_promedio"]) < 0:
         raise ErrorNegocio("El costo no puede ser negativo.")
 
@@ -128,15 +138,17 @@ def crear(db: Session, usuario: m.Usuario, datos: dict) -> m.Producto:
         categoria_id=datos.get("categoria_id"), marca=(datos.get("marca") or "").strip() or None,
         proveedor_id=datos.get("proveedor_id"), impuesto_id=datos.get("impuesto_id"),
         costo_promedio=float(datos.get("costo_promedio") or 0), precio_venta=int(datos.get("precio_venta") or 0),
-        stock_minimo=int(datos.get("stock_minimo") or 0), stock_maximo=int(datos.get("stock_maximo") or 0),
+        unidad=datos.get("unidad") or "u", rapido=bool(datos.get("rapido")), stock_minimo=0, stock_maximo=0,
         ubicacion=(datos.get("ubicacion") or "").strip() or None, activo=bool(datos.get("activo", True)),
         stock_actual=0, creado_en=ahora_, actualizado_en=ahora_)
     if p.codigo_interno and db.scalar(select(m.Producto.id).where(m.Producto.codigo_interno == p.codigo_interno)):
         raise ErrorNegocio("Ya existe un producto con ese código interno.", 409)
+    p.stock_minimo = unidades.normalizar(p, datos.get("stock_minimo") or 0, permitir_cero=True)
+    p.stock_maximo = unidades.normalizar(p, datos.get("stock_maximo") or 0, permitir_cero=True)
+    inicial = unidades.normalizar(p, datos.get("stock_inicial") or 0, permitir_cero=True)
     db.add(p)
     db.flush()
     _asignar_codigos(db, p, datos.get("codigos") or [])
-    inicial = int(datos.get("stock_inicial") or 0)
     if inicial:
         inv.saldo_inicial(db, usuario.id, p, inicial, p.costo_promedio)
     auditar(db, usuario.id, "PRODUCTO_CREADO", "producto", p.id, despues={"nombre": p.nombre, "precio": p.precio_venta})
@@ -170,9 +182,23 @@ def actualizar(db: Session, usuario: m.Usuario, producto_id: int, datos: dict) -
                     select(m.Producto.id).where(m.Producto.codigo_interno == v)):
                 raise ErrorNegocio("Ya existe un producto con ese código interno.", 409)
             setattr(p, campo, v if campo != "nombre" else (v or p.nombre))
-    for campo in ("categoria_id", "proveedor_id", "impuesto_id", "stock_minimo", "stock_maximo"):
+    if datos.get("unidad") and datos["unidad"] != p.unidad:
+        if db.scalar(select(func.count()).select_from(m.MovimientoInventario).where(
+                m.MovimientoInventario.producto_id == p.id)):
+            raise ErrorNegocio(f"«{p.nombre}» ya tiene movimientos de inventario en "
+                               f"{'kilos' if p.unidad == 'kg' else 'unidades'}; cambiarle la unidad confundiría el "
+                               "historial. Desactívelo y cree uno nuevo con la unidad correcta.", 409)
+        auditar(db, usuario.id, "CAMBIO_UNIDAD", "producto", p.id, antes={"unidad": p.unidad},
+                despues={"unidad": datos["unidad"]})
+        p.unidad = datos["unidad"]
+    if datos.get("rapido") is not None:
+        p.rapido = bool(datos["rapido"])
+    for campo in ("categoria_id", "proveedor_id", "impuesto_id"):
         if campo in datos:
-            setattr(p, campo, datos[campo] if datos[campo] is None or campo.endswith("_id") else int(datos[campo]))
+            setattr(p, campo, datos[campo])
+    for campo in ("stock_minimo", "stock_maximo"):
+        if campo in datos:
+            setattr(p, campo, unidades.normalizar(p, datos[campo] or 0, permitir_cero=True))
     if "activo" in datos:
         p.activo = bool(datos["activo"])
     if "costo_promedio" in datos and datos["costo_promedio"] is not None:
@@ -219,10 +245,13 @@ def historial_precios(db: Session, producto_id: int) -> list[dict]:
 
 # ───────────────────────────── Importación desde Excel / CSV ─────────────────────────────
 COLUMNAS = ["codigo_barras", "nombre", "categoria", "marca", "proveedor", "impuesto", "costo", "precio",
-            "stock_inicial", "stock_minimo", "ubicacion"]
+            "stock_inicial", "stock_minimo", "ubicacion", "unidad"]
 _ALIAS = {"codigo": "codigo_barras", "codigo de barras": "codigo_barras", "barras": "codigo_barras",
           "ean": "codigo_barras", "producto": "nombre", "descripcion": "nombre", "costo_unitario": "costo",
-          "precio_venta": "precio", "stock": "stock_inicial", "existencia": "stock_inicial", "minimo": "stock_minimo"}
+          "precio_venta": "precio", "stock": "stock_inicial", "existencia": "stock_inicial", "minimo": "stock_minimo",
+          "medida": "unidad", "unidad_de_medida": "unidad", "plu": "codigo_interno"}
+_UNIDADES_TEXTO = {"": "", "u": "u", "und": "u", "unidad": "u", "unidades": "u", "kg": "kg", "kilo": "kg", "kilos": "kg",
+                   "peso": "kg", "k": "kg"}
 
 
 def plantilla_xlsx() -> bytes:
@@ -235,10 +264,11 @@ def plantilla_xlsx() -> bytes:
     for c in ws[1]:
         c.font = Font(bold=True, color="FFFFFF")
         c.fill = PatternFill("solid", fgColor="0F766E")
-    ws.append(["7701234567890", "Leche entera 1 L", "Lácteos", "Alquería", "Distribuidora Lácteos", "Excluido", 3100, 4200, 24, 12, "Pasillo 3"])
-    ws.append(["7709876543210", "Aceite vegetal 1 L", "Despensa", "Premier", "Grasas del Valle", "IVA 19%", 8900, 11500, 18, 6, "Pasillo 1"])
-    ws.append(["", "Una línea por producto. Código y ubicación opcionales. Un código con varias unidades se agrega luego en el producto.", "", "", "", "", "", "", "", "", ""])
-    for i, w in enumerate([18, 34, 18, 16, 24, 14, 10, 10, 14, 14, 14], start=1):
+    ws.append(["7701234567890", "Leche entera 1 L", "Lácteos", "Alquería", "Distribuidora Lácteos", "Excluido", 3100, 4200, 24, 12, "Pasillo 3", "u"])
+    ws.append(["7709876543210", "Aceite vegetal 1 L", "Despensa", "Premier", "Grasas del Valle", "IVA 19%", 8900, 11500, 18, 6, "Pasillo 1", "u"])
+    ws.append(["", "Tomate chonto (el precio y el costo son por kilo)", "Verduras", "", "", "Excluido", 2400, 3500, "40,5", 10, "Frescos", "kg"])
+    ws.append(["", "Una línea por producto. Código y ubicación opcionales. Unidad: u (por unidad) o kg (por peso; decimales con coma). Un código con varias unidades se agrega luego en el producto.", "", "", "", "", "", "", "", "", "", ""])
+    for i, w in enumerate([18, 34, 18, 16, 24, 14, 10, 10, 14, 14, 14, 10], start=1):
         ws.column_dimensions[chr(64 + i)].width = w
     buf = io.BytesIO()
     wb.save(buf)
@@ -302,8 +332,13 @@ def importar(db: Session, usuario: m.Usuario, nombre_archivo: str, contenido: by
                 vistos.add(codigo)
             costo = _num(f.get("costo", ""), "costo", entero=False)
             precio = _num(f.get("precio", ""), "precio")
-            stock = int(_num(f.get("stock_inicial", ""), "stock_inicial"))
-            minimo = int(_num(f.get("stock_minimo", ""), "stock_minimo"))
+            unidad = _UNIDADES_TEXTO.get(_normalizar(f.get("unidad", "")))
+            if unidad is None:
+                raise ValueError(f"unidad «{f['unidad']}» no válida (use u o kg)")
+            stock = _num(f.get("stock_inicial", ""), "stock_inicial", entero=False)
+            minimo = _num(f.get("stock_minimo", ""), "stock_minimo", entero=False)
+            if unidad != "kg" and (stock != int(stock) or minimo != int(minimo)):
+                raise ValueError("el stock de un producto por unidad debe ser entero (use unidad kg para decimales)")
             imp = None
             if f.get("impuesto"):
                 imp = impuestos.get(_normalizar(f["impuesto"]))
@@ -327,7 +362,9 @@ def importar(db: Session, usuario: m.Usuario, nombre_archivo: str, contenido: by
             datos = {"nombre": nombre, "categoria_id": cat.id if cat else None, "marca": f.get("marca"),
                      "proveedor_id": prov.id if prov else None, "impuesto_id": imp.id if imp else None,
                      "costo_promedio": costo, "precio_venta": precio, "stock_minimo": minimo,
-                     "ubicacion": f.get("ubicacion"), "codigos": [{"codigo": codigo, "unidades": 1}] if codigo else []}
+                     "unidad": unidad or None, "ubicacion": f.get("ubicacion"), "codigos": [{"codigo": codigo, "unidades": 1}] if codigo else []}
+            if f.get("codigo_interno"):  # PLU: el código corto que el cajero escribe en la balanza
+                datos["codigo_interno"] = f["codigo_interno"]
             if existente:
                 datos.pop("codigos")
                 actualizar(db, usuario, existente.producto_id, datos)

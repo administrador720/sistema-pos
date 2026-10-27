@@ -256,3 +256,15 @@ table.t.compact td { padding: 7px 12px; } table.t td.actions { text-align: right
 .dash-fila { display: grid; gap: 14px; margin-bottom: 14px; }
 .dash-fila.f21 { grid-template-columns: 2fr 1fr; } .dash-fila.f12 { grid-template-columns: 1.35fr 1fr; } .dash-fila.f3 { grid-template-columns: repeat(3, 1fr); }
 @media (max-width: 1180px) { .dash-fila.f21, .dash-fila.f12, .dash-fila.f3 { grid-template-columns: 1fr; } }
+
+/* ── Productos por peso (verduras y frutas) */
+.cart .qtybox.kg { gap: 8px; cursor: pointer; } .cart .qtybox.kg b { min-width: 0; }
+.cart .qtybox.kg button { width: 26px; height: 26px; }
+.rapidos { display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: 10px; }
+.rapido { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; text-align: left; padding: 12px 14px; border-radius: 14px; cursor: pointer;
+  border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; min-height: 78px; transition: border-color .12s, background .12s; }
+.rapido:hover, .rapido:focus-visible { border-color: var(--accent); background: var(--accent-soft); }
+.rapido b { font-size: 14.5px; line-height: 1.25; } .rapido .pr { color: var(--accent-text); font-weight: 650; font-variant-numeric: tabular-nums; font-size: 13.5px; }
+.rapido .plu { margin-top: auto; font-size: 11.5px; color: var(--faint); }
+.peso-total { background: var(--accent-soft); color: var(--accent-text); border-radius: 14px; padding: 14px 18px; text-align: center; }
+.peso-total .big { font-size: 40px; font-weight: 700; letter-spacing: -.02em; line-height: 1.1; font-variant-numeric: tabular-nums; }

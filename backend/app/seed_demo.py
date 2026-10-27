@@ -62,15 +62,30 @@ CATALOGO = [
     ("Pechuga de pollo 1 kg", "Carnes", 4, "Excluido", 13500, 18500, 30, 10), ("Carne molida 500 g", "Carnes", 4, "Excluido", 9800, 13900, 25, 8),
     ("Chorizo x6", "Carnes", 4, "IVA 19%", 7600, 10900, 20, 6), ("Salchichas x8", "Carnes", 4, "IVA 19%", 5400, 7800, 28, 8),
     ("Jamón de cerdo 250 g", "Carnes", 4, "IVA 19%", 6900, 9800, 20, 6), ("Costilla de cerdo 500 g", "Carnes", 4, "Excluido", 8800, 12500, 16, 5),
-    ("Tomate chonto 1 kg", "Frutas y verduras", 4, "Excluido", 2800, 4200, 30, 10), ("Cebolla cabezona 1 kg", "Frutas y verduras", 4, "Excluido", 2300, 3500, 30, 10),
-    ("Papa pastusa 2 kg", "Frutas y verduras", 4, "Excluido", 4400, 6400, 40, 12), ("Plátano maduro und", "Frutas y verduras", 4, "Excluido", 1100, 1800, 80, 24),
+    ("Plátano maduro und", "Frutas y verduras", 4, "Excluido", 1100, 1800, 80, 24),
     ("Banano x6", "Frutas y verduras", 4, "Excluido", 2200, 3300, 36, 12), ("Limón tahití malla", "Frutas y verduras", 4, "Excluido", 2100, 3200, 24, 8),
-    ("Aguacate hass und", "Frutas y verduras", 4, "Excluido", 2600, 3900, 30, 10), ("Zanahoria 500 g", "Frutas y verduras", 4, "Excluido", 1300, 2000, 28, 8),
+    ("Aguacate hass und", "Frutas y verduras", 4, "Excluido", 2600, 3900, 30, 10),
     ("Papas fritas 120 g", "Snacks y dulces", 5, "IVA 19%", 3300, 4900, 70, 20), ("Chocolatina 30 g", "Snacks y dulces", 5, "IVA 19%", 1100, 1800, 90, 30),
     ("Maní salado 100 g", "Snacks y dulces", 5, "IVA 19%", 1800, 2800, 45, 15), ("Chicles x12", "Snacks y dulces", 5, "IVA 19%", 1500, 2400, 50, 15),
     ("Dulces surtidos bolsa", "Snacks y dulces", 5, "IVA 19%", 2700, 4100, 30, 10), ("Galletas de chocolate x6", "Snacks y dulces", 5, "IVA 19%", 2900, 4400, 45, 15),
     ("Pan tajado 500 g", "Panadería", 5, "IVA 19%", 4800, 6900, 40, 15), ("Arepas de maíz x5", "Panadería", 5, "IVA 19%", 3200, 4700, 36, 12),
     ("Pandebono und", "Panadería", 5, "IVA 19%", 800, 1500, 60, 20), ("Pan de bono x4", "Panadería", 5, "IVA 19%", 3100, 4500, 24, 8),
+]
+# Verduras y frutas que se venden por peso (precio y costo por KILO): (nombre, costo, precio, stock kg, mínimo kg, botón rápido)
+CATALOGO_PESO = [
+    ("Tomate chonto", 2400, 3500, 60, 15, True), ("Cebolla cabezona blanca", 2000, 3000, 50, 12, True),
+    ("Cebolla larga", 2600, 3800, 20, 6, True), ("Papa pastusa", 1700, 2600, 120, 30, True),
+    ("Papa criolla", 3200, 4600, 30, 8, True), ("Zanahoria", 1500, 2400, 45, 12, True),
+    ("Pimentón rojo", 3800, 5600, 15, 4, True), ("Pimentón verde", 3000, 4400, 15, 4, False),
+    ("Lechuga batavia", 2800, 4200, 14, 4, True), ("Repollo", 1400, 2200, 22, 6, False),
+    ("Cilantro", 5200, 7800, 6, 2, True), ("Ajo", 9500, 13500, 8, 2, False),
+    ("Pepino cohombro", 2100, 3200, 18, 5, False), ("Habichuela", 3600, 5400, 12, 4, False),
+    ("Remolacha", 1800, 2800, 14, 4, False), ("Ahuyama", 1300, 2100, 25, 6, False),
+    ("Yuca", 1600, 2500, 35, 10, True), ("Plátano verde", 1900, 2900, 50, 14, True),
+    ("Mango tommy", 3100, 4800, 25, 8, False), ("Papaya", 2600, 3900, 22, 6, False),
+    ("Tomate de árbol", 3500, 5200, 12, 4, False), ("Mora", 7200, 10500, 8, 3, False),
+    ("Naranja", 1700, 2700, 60, 16, True), ("Limón mandarino", 2300, 3500, 20, 6, False),
+    ("Fresa", 6800, 9800, 10, 3, False), ("Maracuyá", 4200, 6200, 14, 4, False),
 ]
 FACTOR_DIA = {0: 0.85, 1: 0.8, 2: 0.85, 3: 0.95, 4: 1.2, 5: 1.45, 6: 1.1}  # lunes=0
 HORAS_MANANA = ([7, 8, 9, 10, 11, 12, 13], [1, 1.5, 2, 3, 4, 4.5, 3])
@@ -132,6 +147,15 @@ def generar(dias: int = 30, ventas_dia: int = 90, semilla: int = 7):
             objetivos[p.id] = (stock, minimo)
             costo_base[p.id] = costo
             productos.append(p)
+        for j, (nombre, costo, precio, stock, minimo, rapido) in enumerate(CATALOGO_PESO, start=1):
+            p = prod_svc.crear(s, admin, {
+                "nombre": nombre, "categoria_id": cats["Frutas y verduras"].id, "proveedor_id": provs[4].id,
+                "impuesto_id": impuestos["Excluido"].id, "unidad": "kg", "rapido": rapido, "codigo_interno": str(100 + j),
+                "costo_promedio": costo, "precio_venta": precio, "stock_inicial": round(stock * 0.9, 1), "stock_minimo": minimo,
+                "stock_maximo": stock * 2, "ubicacion": "Frescos", "codigos": []})
+            objetivos[p.id] = (stock, minimo)
+            costo_base[p.id] = costo
+            productos.append(p)
         s.commit()
         pesos = [1 / ((i + 1) ** 0.85) for i in range(len(productos))]
         rnd.shuffle(pesos)
@@ -148,7 +172,8 @@ def generar(dias: int = 30, ventas_dia: int = 90, semilla: int = 7):
                 if p.stock_actual <= minimo * 1.3:
                     deriva = 1 + 0.0015 * d + rnd.uniform(-0.02, 0.03)  # inflación lenta sobre el costo de catálogo
                     por_prov.setdefault(p.proveedor_id, []).append(
-                        {"producto_id": p.id, "cantidad": max(1, objetivo - p.stock_actual), "costo_unitario": round(costo_base[p.id] * deriva)})
+                        {"producto_id": p.id, "cantidad": core.cant(max(1, objetivo - p.stock_actual)),
+                         "costo_unitario": round(costo_base[p.id] * deriva)})
             for prov_id, items in por_prov.items():
                 compras_svc.crear_compra(s, admin, {"proveedor_id": prov_id, "numero_factura": f"FV-{dia:%m%d}-{prov_id}", "items": items})
             fijar(6, 45)
@@ -172,16 +197,34 @@ def generar(dias: int = 30, ventas_dia: int = 90, semilla: int = 7):
                     elegidos = {}
                     for p in rnd.choices(productos, pesos, k=n_items):
                         if p.stock_actual > 0 and p.id not in elegidos:
-                            elegidos[p.id] = {"producto_id": p.id, "cantidad": rnd.choices([1, 2, 3, 4], [78, 15, 5, 2])[0], "descuento": 0}
+                            if p.unidad == "kg":  # por peso: unos kilos, o «$3.000 de tomate»
+                                if rnd.random() < 0.15:
+                                    elegidos[p.id] = {"producto_id": p.id, "valor": rnd.choice([1000, 2000, 3000, 5000]), "descuento": 0}
+                                else:
+                                    elegidos[p.id] = {"producto_id": p.id, "descuento": 0,
+                                                      "cantidad": rnd.choice([0.25, 0.35, 0.5, 0.75, 1, 1.25, 1.5, 2, 3])}
+                            else:
+                                elegidos[p.id] = {"producto_id": p.id, "cantidad": rnd.choices([1, 2, 3, 4], [78, 15, 5, 2])[0], "descuento": 0}
                     items = list(elegidos.values())
                     if not items:
                         continue
                     for it in items:
-                        it["cantidad"] = min(it["cantidad"], max(1, s.get(m.Producto, it["producto_id"]).stock_actual))
-                    bruto = sum(s.get(m.Producto, it["producto_id"]).precio_venta * it["cantidad"] for it in items)
+                        pr = s.get(m.Producto, it["producto_id"])
+                        if pr.unidad == "kg":
+                            if "valor" in it and it["valor"] / pr.precio_venta > pr.stock_actual:
+                                del it["valor"]
+                                it["cantidad"] = pr.stock_actual
+                            elif "cantidad" in it:
+                                it["cantidad"] = min(it["cantidad"], pr.stock_actual)
+                        else:
+                            it["cantidad"] = min(it["cantidad"], max(1, pr.stock_actual))
+                    bruto = sum(it["valor"] if "valor" in it else
+                                core.valor_linea(s.get(m.Producto, it["producto_id"]).precio_venta, it["cantidad"]) for it in items)
                     if rnd.random() < 0.03:  # descuento de hasta el 10 % en una línea
                         it = items[0]
-                        it["descuento"] = int(s.get(m.Producto, it["producto_id"]).precio_venta * it["cantidad"] * rnd.choice([0.05, 0.1]))
+                        base_linea = it["valor"] if "valor" in it else core.valor_linea(
+                            s.get(m.Producto, it["producto_id"]).precio_venta, it["cantidad"])
+                        it["descuento"] = int(base_linea * rnd.choice([0.05, 0.1]))
                         bruto -= it["descuento"]
                     azar = rnd.random()
                     if azar < 0.58:
@@ -203,7 +246,7 @@ def generar(dias: int = 30, ventas_dia: int = 90, semilla: int = 7):
                     elif rnd.random() < 0.008:
                         it = v.items[0]
                         medio = "banco" if any(p.medio.tipo == "banco" for p in v.pagos) and not any(p.medio.tipo == "efectivo" for p in v.pagos) else "efectivo"
-                        ventas_svc.devolver(s, admin, v.id, [{"venta_item_id": it.id, "cantidad": 1, "danado": rnd.random() < 0.3}], medio,
+                        ventas_svc.devolver(s, admin, v.id, [{"venta_item_id": it.id, "cantidad": min(1, it.cantidad), "danado": rnd.random() < 0.3}], medio,
                                             rnd.choice(["Producto en mal estado", "No era lo que buscaba", "Error de precio"]))
                     if not retiro_hecho and k > len(momentos) * 0.6:
                         retiro_hecho = True

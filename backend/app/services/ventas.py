@@ -9,10 +9,11 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from .. import models as m
-from ..core import (ErrorNegocio, ahora, auditar, autorizar, cfg, cfg_int, cfg_set, desglosar_impuesto,
-                    prorratear, redondear)
+from ..core import (ErrorNegocio, ahora, auditar, autorizar, cant, cfg, cfg_int, cfg_set, desglosar_impuesto,
+                    prorratear, redondear, valor_linea)
 from . import caja as caja_svc
 from . import inventario as inv
+from . import unidades
 
 
 # ───────────────────────────── Cobro ─────────────────────────────
@@ -35,25 +36,35 @@ def crear_venta(db: Session, usuario: m.Usuario, datos: dict, pin: str | None = 
     ids = {int(e["producto_id"]) for e in entradas}
     productos = {p.id: p for p in db.scalars(select(m.Producto).where(m.Producto.id.in_(ids))
                                              .options(selectinload(m.Producto.impuesto)))}
-    pedido: dict[int, int] = defaultdict(int)
+    pedido: dict[int, float] = defaultdict(int)
+    cantidades = []  # (cantidad, valor_en_pesos | None) de cada entrada
     for e in entradas:
         p = productos.get(int(e["producto_id"]))
         if not p or not p.activo:
             raise ErrorNegocio("Hay un producto inexistente o inactivo en la venta.", 404)
-        if int(e["cantidad"]) <= 0:
-            raise ErrorNegocio(f"Cantidad no válida para «{p.nombre}».")
-        pedido[p.id] += int(e["cantidad"])
-    for pid, cant in pedido.items():
-        inv.verificar_stock(db, productos[pid], cant)
+        valor = int(e.get("valor") or 0)
+        if valor:  # «$5.000 de tomate»: se vende ese valor y el peso se deduce del precio por kilo
+            if not unidades.es_peso(p):
+                raise ErrorNegocio(f"«{p.nombre}» se vende por unidad: indique la cantidad, no un valor en pesos.")
+            if valor < 0 or p.precio_venta <= 0:
+                raise ErrorNegocio(f"«{p.nombre}» no tiene precio por kilo; no se puede vender por valor.")
+            c = unidades.normalizar(p, valor / p.precio_venta)
+        else:
+            if e.get("cantidad") is None:
+                raise ErrorNegocio(f"Indique la cantidad de «{p.nombre}».")
+            c = unidades.normalizar(p, e["cantidad"])
+        cantidades.append((c, valor or None))
+        pedido[p.id] = cant(pedido[p.id] + c)
+    for pid, total_pedido in pedido.items():
+        inv.verificar_stock(db, productos[pid], total_pedido)
 
     # ── líneas: el precio SIEMPRE sale de la base de datos
     lineas = []
-    for e in entradas:
+    for e, (c, valor) in zip(entradas, cantidades):
         p = productos[int(e["producto_id"])]
-        cant = int(e["cantidad"])
-        bruto = p.precio_venta * cant
+        bruto = valor if valor else valor_linea(p.precio_venta, c)
         desc = min(max(int(e.get("descuento") or 0), 0), bruto)
-        lineas.append({"p": p, "cant": cant, "bruto": bruto, "desc_linea": desc, "desc_global": 0})
+        lineas.append({"p": p, "cant": c, "bruto": bruto, "desc_linea": desc, "desc_global": 0})
 
     desc_global = max(int(datos.get("descuento_global") or 0), 0)
     reparto = prorratear(desc_global, [l["bruto"] - l["desc_linea"] for l in lineas])
@@ -202,31 +213,31 @@ def devolver(db: Session, usuario: m.Usuario, venta_id: int, items: list[dict], 
     total_dev = imp_dev = 0
     for e in items:
         it = por_id.get(int(e["venta_item_id"]))
-        cant = int(e["cantidad"])
         if not it:
             raise ErrorNegocio("Un producto no pertenece a la venta.")
-        if cant <= 0:
+        p = db.get(m.Producto, it.producto_id)
+        if not e.get("cantidad") or float(e["cantidad"]) <= 0:
             continue
+        c = unidades.normalizar(p, e["cantidad"])
         prev_c, prev_t, prev_i = db.execute(select(
             func.coalesce(func.sum(m.DevolucionItem.cantidad), 0), func.coalesce(func.sum(m.DevolucionItem.total), 0),
             func.coalesce(func.sum(m.DevolucionItem.valor_impuesto), 0)).where(
             m.DevolucionItem.venta_item_id == it.id)).one()
-        restante = it.cantidad - prev_c
-        if cant > restante:
-            raise ErrorNegocio(f"De «{it.descripcion}» solo se pueden devolver {restante} unidad(es).")
-        if cant == restante:  # última devolución de la línea: cierra sin diferencias de redondeo
+        restante = cant(it.cantidad - prev_c)
+        if c > restante:
+            raise ErrorNegocio(f"De «{it.descripcion}» solo se pueden devolver {unidades.texto(p.unidad, restante)}.")
+        if c == restante:  # última devolución de la línea: cierra sin diferencias de redondeo
             valor, imp = it.total - prev_t, it.valor_impuesto - prev_i
         else:
-            valor, imp = redondear(it.total * cant / it.cantidad), redondear(it.valor_impuesto * cant / it.cantidad)
+            valor, imp = redondear(it.total * c / it.cantidad), redondear(it.valor_impuesto * c / it.cantidad)
         danado = bool(e.get("danado"))
-        db.add(m.DevolucionItem(devolucion_id=dev.id, venta_item_id=it.id, producto_id=it.producto_id, cantidad=cant,
+        db.add(m.DevolucionItem(devolucion_id=dev.id, venta_item_id=it.id, producto_id=it.producto_id, cantidad=c,
                                 total=valor, valor_impuesto=imp, costo_unitario=it.costo_unitario, danado=danado))
-        p = db.get(m.Producto, it.producto_id)
-        inv.registrar_movimiento(db, p, "DEVOLUCION_VENTA", cant, costo_unitario=it.costo_unitario,
+        inv.registrar_movimiento(db, p, "DEVOLUCION_VENTA", c, costo_unitario=it.costo_unitario,
                                  referencia_tipo="devolucion", referencia_id=dev.id, usuario_id=usuario.id,
                                  nota=motivo.strip())
         if danado:  # el producto no vuelve a la góndola: queda como merma
-            inv.registrar_movimiento(db, p, "MERMA", -cant, costo_unitario=it.costo_unitario,
+            inv.registrar_movimiento(db, p, "MERMA", -c, costo_unitario=it.costo_unitario,
                                      referencia_tipo="devolucion", referencia_id=dev.id, usuario_id=usuario.id,
                                      motivo="DANADO", nota="Devolución de producto dañado")
         total_dev += valor
@@ -283,10 +294,11 @@ def retomar(db: Session, suspendida_id: int) -> dict:
 def serializar(db: Session, v: m.Venta) -> dict:
     devs = db.scalars(select(m.Devolucion).where(m.Devolucion.venta_id == v.id).options(
         selectinload(m.Devolucion.items))).all()
-    devuelto: dict[int, int] = defaultdict(int)
+    devuelto: dict[int, float] = defaultdict(int)
     for d in devs:
         for di in d.items:
-            devuelto[di.venta_item_id] += di.cantidad
+            devuelto[di.venta_item_id] = cant(devuelto[di.venta_item_id] + di.cantidad)
+    unidad_de = unidades.mapa(db, [i.producto_id for i in v.items])
     cajero = db.scalar(select(m.Usuario.nombre).where(m.Usuario.id == v.usuario_id))
     return {
         "id": v.id, "numero": v.numero, "prefijo": v.prefijo, "consecutivo": v.consecutivo, "turno_id": v.turno_id,
@@ -296,7 +308,7 @@ def serializar(db: Session, v: m.Venta) -> dict:
         "cliente": {"id": v.cliente.id, "nombre": v.cliente.nombre,
                     "documento": f"{v.cliente.tipo_documento} {v.cliente.numero_documento}"} if v.cliente else None,
         "items": [{"id": i.id, "producto_id": i.producto_id, "descripcion": i.descripcion, "cantidad": i.cantidad,
-                   "precio_unitario": i.precio_unitario, "descuento": i.descuento, "tarifa_pct": i.tarifa_pct,
+                   "unidad": unidad_de.get(i.producto_id, "u"), "precio_unitario": i.precio_unitario, "descuento": i.descuento, "tarifa_pct": i.tarifa_pct,
                    "valor_impuesto": i.valor_impuesto, "total": i.total, "devuelto": devuelto.get(i.id, 0)}
                   for i in v.items],
         "pagos": [{"medio": p.medio.nombre, "tipo": p.medio.tipo, "monto": p.monto, "recibido": p.recibido,

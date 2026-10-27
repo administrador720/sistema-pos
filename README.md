@@ -11,6 +11,7 @@ todo con teclado y lector de código de barras.
 | Área | Qué hace |
 |---|---|
 | **Caja** | Venta con lector de código de barras siempre enfocado · cantidad con `6*` · pago en **efectivo** (con devuelta), **banco** (débito, crédito, transferencia/QR) o **mixto** · ventas suspendidas · descuentos · anulaciones y devoluciones con PIN del administrador · cajón monedero · recibo en PDF. |
+| **Verduras y frutas (por peso)** | Productos que se venden **por kilo**: el cajero escribe lo que marca la balanza (o «$5.000 de tomate») y el sistema calcula el valor. Código corto (PLU), botones rápidos para las verduras de todos los días (F1), stock en kilos con gramos, compras, mermas, conteos y devoluciones por peso. |
 | **Turnos** | Al abrir caja pregunta la **base** (el efectivo con el que se da devueltas; se puede contar por billetes y monedas). Al cerrar hace un **arqueo ciego**: el cajero cuenta sin ver cuánto debería haber; el sistema calcula sobrante/faltante en efectivo y en banco. Retiros e ingresos con motivo y autorización. |
 | **Inventario** | Productos con varios códigos de barras (y códigos de paca), kardex de cada movimiento, compras con **costo promedio ponderado**, mermas, ajustes, alertas de stock, importación desde Excel y cambio masivo de precios. |
 | **Conteos** | El administrador decide **cuándo** contar (manual o programado: cada N días, semanal, quincenal, mensual) y qué (todo, una parte, o cíclico). Captura **ciega** con el lector, se puede contar con la tienda abierta (el stock teórico es el del momento exacto de cada captura), revisión de **inconsistencias** (faltantes/sobrantes en pesos, faltantes repetidos en conteos seguidos, exactitud), reconteo y aplicación de ajustes. |
@@ -75,10 +76,41 @@ cd backend && ../.venv/bin/python -m app.seed_demo --forzar   # opcional: datos 
 |---|---|---|---|---|
 | `Enter` | agregar lo escaneado | | `F6` / `F7` | suspender / retomar venta |
 | `6*` + escanear | 6 unidades | | `F8` | ventas del turno (recibo, anular, devolución) |
-| `F2` | buscar por nombre | | `F9` `F10` `F11` | cobrar: efectivo / banco / mixto |
-| `F3` | cambiar cantidad | | `F12` | retiro, ingreso o abrir cajón |
-| `F4` / `Supr` | quitar línea | | `Esc` | cancelar venta |
-| `F5` | descuento | | `↑` `↓` `+` `-` | elegir línea / cantidad |
+| `1,25*` + código corto | 1,250 kg sin preguntar | | `F9` `F10` `F11` | cobrar: efectivo / banco / mixto |
+| `F1` | verduras y frutas (botones) | | `F12` | retiro, ingreso o abrir cajón |
+| `F2` | buscar por nombre | | `Esc` | cancelar venta |
+| `F3` | cambiar cantidad o peso | | `↑` `↓` `+` `-` | elegir línea / cantidad |
+| `F4` / `Supr` | quitar línea | | `F5` | descuento |
+
+## Verduras y frutas: venta por peso
+
+El supermercado vende verduras por kilo y con mucha variedad. Cada una se crea como un producto **«Se vende por peso (kg)»**: el **precio y el costo son por kilo**, las existencias están en kilos (con gramos: 40,500 kg) y la caja pide el peso en vez de la cantidad.
+
+![Caja con verduras por peso](docs/img/caja-peso.png)
+
+**Configurar (una vez):** *Productos → Nuevo producto* → «Se vende por peso (kg)» → nombre, precio por kilo, costo por kilo y existencias en kg. Ponga un **código corto (PLU)** como `101` y marque **«Botón rápido en la caja»** en las que más se venden. También se pueden cargar todas desde Excel: la plantilla trae las columnas `unidad` (`kg`) y `plu`.
+
+**Vender (balanza común en la caja):** el cajero pesa, y luego…
+
+| Quiere | Haga |
+|---|---|
+| Elegir de los botones | `F1` → toque la verdura → escriba el peso → `Enter` |
+| Escribir el código corto | `101` + `Enter` → escriba el peso → `Enter` |
+| Escribir el peso antes | `1,25*101` + `Enter` (agrega 1,250 kg de una vez) |
+| «$5.000 de tomate» | en la ventana de peso, pestaña **Valor en pesos** → `5000` (se cobra exacto y el peso se calcula) |
+| Buscar por nombre | `F2`, escriba «tomate» y elija |
+| Corregir un peso | seleccione la línea → `F3` |
+
+| Botones rápidos (F1) | Ventana de peso |
+|---|---|
+| ![Botones rápidos](docs/img/rapidos.png) | ![Peso](docs/img/peso.png) |
+
+* El valor de cada línea se calcula en pesos enteros (`0,350 kg × $3.500 = $1.225`), igual en pantalla, en el servidor y en el recibo.
+* Las **devoluciones** también son por peso (se puede devolver 0,750 kg de 2 kg) y lo dañado sale como merma.
+* En **conteos** de inventario, los productos por peso siempre preguntan los kilos contados.
+* Un producto por unidad solo acepta cantidades enteras; uno por peso acepta hasta 3 decimales (gramos). El sistema avisa si se intenta otra cosa.
+* No se puede cambiar la unidad de un producto que ya tiene movimientos (confundiría el historial): desactívelo y cree uno nuevo.
+* Los informes suman unidades y kilos en la misma columna («Unid. / kg»); el panel cuenta como «artículos por tiquete» solo las unidades.
 
 ## Olvidé mi contraseña
 
@@ -152,4 +184,4 @@ El servidor solo escucha en `127.0.0.1` y rechaza peticiones cuyo `Host` no sea 
 
 ## Limitaciones conocidas
 
-No incluye (aún): productos por peso/balanza, impresión directa en térmica, facturación DIAN, varias cajas en red, crédito (fiado), lotes y vencimientos, promociones, clientes en la pantalla de venta (la API ya los soporta). Ver `docs/plan.md` (fase 7).
+No incluye (aún): balanza conectada por cable (hoy el cajero escribe el peso) o etiquetas de balanza con el precio en el código de barras, impresión directa en térmica, facturación DIAN, varias cajas en red, crédito (fiado), lotes y vencimientos, promociones, clientes en la pantalla de venta (la API ya los soporta). Ver `docs/plan.md` (fase 7).
