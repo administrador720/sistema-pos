@@ -94,7 +94,7 @@ const Raiz = {
       document.addEventListener('click', e => { if (!e.target.closest('.menu-wrap')) menu.value = false; });
       try {
         const est = await (await fetch('/api/setup/estado')).json();
-        store.configurado = est.configurado;
+        store.configurado = est.configurado; store.version = est.version || '';
         if (est.configurado && sesion.token) {
           try { await iniciarSesionCargada(); } catch (e) { sesion.limpiar(); }
         }
@@ -126,6 +126,7 @@ const Raiz = {
         </nav>
         <div class="side-foot">
           <button class="btn ghost block" style="justify-content:flex-start" @click="bloquear" title="Bloquear pantalla"><Icono n="candado"/><span class="txt">Bloquear</span></button>
+          <div class="xs muted txt" style="padding:2px 12px" v-if="store.version">Versión {{ store.version }}</div>
         </div>
       </aside>
       <div class="main">
@@ -136,6 +137,9 @@ const Raiz = {
             <i></i>
             <span v-if="store.turno">Turno #{{ store.turno.id }} · {{ store.turno.usuario }} · desde {{ hora(store.turno.abierto_en) }}</span>
             <span v-else>Caja cerrada</span>
+          </button>
+          <button class="turno-chip nueva-version" v-if="esAdmin() && store.actualizacion" @click="store.pestanaConfig = 'actualizaciones'; location.hash = '#/config'" title="Hay una versión nueva del programa">
+            <Icono n="subir"/><span>Versión {{ store.actualizacion.version_nueva }} disponible</span>
           </button>
           <button class="btn ghost icon" @click="setTema(store.tema === 'oscuro' ? 'claro' : 'oscuro')" :title="store.tema === 'oscuro' ? 'Tema claro' : 'Tema oscuro'">
             <Icono :n="store.tema === 'oscuro' ? 'sol' : 'luna'"/>

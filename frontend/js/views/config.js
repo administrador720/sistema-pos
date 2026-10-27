@@ -1,9 +1,9 @@
 // Configuración: negocio, reglas, cajón, catálogos, usuarios, respaldos y auditoría + Mi cuenta
 import { api, query } from '../api.js';
-import { store, errorToast, toast, confirmar, pedirTexto, cargarCatalogos, cargarConfig, setTema } from '../store.js';
-import { peso, fechaHora, fecha, isoHoy, miles, descargarBlob } from '../util.js';
+import { store, errorToast, toast, confirmar, pedirTexto, cargarCatalogos, cargarConfig, setTema, buscarActualizacion } from '../store.js';
+import { peso, fechaHora, fecha, isoHoy, miles, descargarBlob, fmtBytes } from '../util.js';
 
-const { ref, reactive, computed, onMounted, watch } = Vue;
+const { ref, reactive, computed, onMounted, onBeforeUnmount, watch } = Vue;
 
 // ───────────────────────── Tabla con formulario genérico ─────────────────────────
 const Crud = {
@@ -97,12 +97,82 @@ const Respaldos = {
     </div>`,
 };
 
+// ───────────────────────── Actualizaciones ─────────────────────────
+const Actualizaciones = {
+  setup() {
+    const info = ref(null), est = ref({ fase: 'ninguna' }), buscando = ref(false), instalando = ref(false), sistema = ref(null), error = ref('');
+    let reloj = null;
+    async function buscar() {
+      buscando.value = true; error.value = '';
+      try { info.value = await buscarActualizacion(true); } catch (e) { error.value = e.message; } finally { buscando.value = false; }
+    }
+    async function sondear() {
+      try { est.value = await api.get('/api/sistema/actualizaciones/estado'); } catch (e) { return; }
+      if (!['descargando', 'verificando'].includes(est.value.fase)) { clearInterval(reloj); reloj = null; }
+    }
+    function vigilar() { if (!reloj) reloj = setInterval(sondear, 600); }
+    async function descargar() {
+      try { est.value = await api.post('/api/sistema/actualizaciones/descargar'); vigilar(); } catch (e) { errorToast(e); }
+    }
+    async function instalar() {
+      const turno = store.turno ? `\n\nHay un turno abierto (${store.turno.usuario}). Seguirá abierto cuando el programa vuelva a abrir.` : '';
+      if (!await confirmar('¿Instalar la versión ' + est.value.version + ' ahora?', 'El programa se cerrará y volverá a abrir solo en un minuto. Antes se hace un respaldo de la base de datos y no se pierde ninguna información.\n\nHágalo cuando no haya una venta en curso: el carrito que esté sin cobrar se pierde.' + turno + '\n\nWindows le pedirá permiso de administrador.', { textoOk: 'Sí, instalar ahora' })) return;
+      instalando.value = true;
+      try { const r = await api.post('/api/sistema/actualizaciones/instalar'); toast(r.mensaje, 'ok', 15000); }
+      catch (e) { instalando.value = false; errorToast(e); }
+    }
+    onMounted(async () => {
+      try { sistema.value = await api.get('/api/sistema/version'); est.value = sistema.value.descarga || est.value; if (['descargando', 'verificando'].includes(est.value.fase)) vigilar(); } catch (e) { errorToast(e); }
+      info.value = store.actualizacion;
+    });
+    onBeforeUnmount(() => clearInterval(reloj));
+    return { info, est, buscando, instalando, sistema, error, buscar, descargar, instalar, store, fechaHora, fmtBytes, repo: 'github.com/administrador720/sistema-pos/releases' };
+  },
+  template: `
+    <div class="stack lg" style="max-width:760px">
+      <div class="card stack">
+        <div class="row between"><div><h3>Versión instalada</h3><div class="muted small">Su información (productos, ventas, usuarios) no se toca al actualizar.</div></div>
+          <span class="chip accent" style="height:30px;font-size:15px">{{ sistema ? sistema.version : store.version }}</span></div>
+        <div class="row"><button class="btn primary" :disabled="buscando" @click="buscar"><Icono n="refrescar"/> {{ buscando ? 'Buscando…' : 'Buscar actualizaciones' }}</button>
+          <span class="muted small">Se busca sola al abrir el programa (si hay internet).</span></div>
+        <div class="alert danger" v-if="error"><Icono n="alerta"/>{{ error }}</div>
+        <div class="alert ok" v-else-if="info && !info.hay_nueva"><Icono n="check"/>Tiene la versión más reciente ({{ info.version_actual }}).</div>
+      </div>
+
+      <div class="card stack" v-if="info && info.hay_nueva">
+        <div class="row between"><h2>Versión {{ info.version_nueva }} disponible</h2><span class="muted small" v-if="info.publicada">{{ fechaHora(info.publicada) }}</span></div>
+        <div v-if="info.notas" class="card soft" style="white-space:pre-line;font-size:14px">{{ info.notas }}</div>
+
+        <div class="alert" v-if="!info.soportado || !info.descargable"><Icono n="info"/><div>{{ info.motivo }}<br>
+          <span class="small">Páginas de versiones: <b>{{ repo }}</b></span></div></div>
+
+        <template v-else>
+          <div v-if="est.fase === 'ninguna' || est.fase === 'error'" class="stack sm">
+            <div class="alert danger" v-if="est.fase === 'error'"><Icono n="alerta"/>{{ est.error }}</div>
+            <div class="row"><button class="btn primary lg" @click="descargar"><Icono n="bajar"/> Descargar actualización <span v-if="info.instalador && info.instalador.tamano">({{ fmtBytes(info.instalador.tamano) }})</span></button></div>
+          </div>
+          <div v-else-if="est.fase === 'descargando' || est.fase === 'verificando'" class="stack sm">
+            <div class="row between small"><span>{{ est.fase === 'verificando' ? 'Verificando el archivo…' : 'Descargando…' }}</span><b class="num">{{ Math.round((est.progreso || 0) * 100) }} %</b></div>
+            <div class="progress"><i :style="{ width: Math.round((est.progreso || 0) * 100) + '%' }"></i></div>
+          </div>
+          <div v-else-if="est.fase === 'listo'" class="stack sm">
+            <div class="alert ok"><Icono n="check"/>Descargada y verificada. Lista para instalar.</div>
+            <div class="row"><button class="btn primary lg" :disabled="instalando" @click="instalar"><Icono n="check"/> {{ instalando ? 'Instalando…' : 'Instalar ahora' }}</button></div>
+            <p class="hint" v-if="instalando">Windows pedirá permiso. El programa se cerrará y abrirá solo; si no abre en un minuto, ábralo con el ícono del escritorio.</p>
+          </div>
+        </template>
+      </div>
+      <p class="hint" v-if="sistema && !sistema.soportado">{{ sistema.motivo }}</p>
+    </div>`,
+};
+
 // ───────────────────────── Configuración ─────────────────────────
 export const Configuracion = {
-  components: { Crud, Auditoria, Respaldos },
+  components: { Crud, Auditoria, Respaldos, Actualizaciones },
   setup() {
-    const tab = ref('negocio'), cfg = reactive({}), cargando = ref(true), usuarios = ref([]), probando = ref(false);
-    const TABS = [['negocio', 'Negocio'], ['ventas', 'Ventas y caja'], ['cajon', 'Cajón monedero'], ['impuestos', 'Impuestos'], ['medios', 'Medios de pago'], ['catalogos', 'Categorías y proveedores'], ['usuarios', 'Usuarios'], ['respaldos', 'Respaldos'], ['auditoria', 'Auditoría']];
+    const tab = ref(store.pestanaConfig || 'negocio'), cfg = reactive({}), cargando = ref(true), usuarios = ref([]), probando = ref(false);
+    const TABS = [['negocio', 'Negocio'], ['ventas', 'Ventas y caja'], ['cajon', 'Cajón monedero'], ['impuestos', 'Impuestos'], ['medios', 'Medios de pago'], ['catalogos', 'Categorías y proveedores'], ['usuarios', 'Usuarios'], ['respaldos', 'Respaldos'], ['actualizaciones', 'Actualizaciones'], ['auditoria', 'Auditoría']];
+    store.pestanaConfig = '';
     async function cargar() { await cargarConfig(); Object.assign(cfg, store.config); await cargarCatalogos(); cargando.value = false; }
     async function cargarUsuarios() { try { usuarios.value = await api.get('/api/usuarios'); } catch (e) { errorToast(e); } }
     onMounted(() => { cargar(); cargarUsuarios(); });
@@ -209,6 +279,7 @@ export const Configuracion = {
         <div><h3 style="margin-bottom:10px">Proveedores</h3><Crud singular="proveedor" :filas="store.cat.proveedores" v-bind="proveedores"/></div></div>
       <Crud v-if="tab === 'usuarios'" singular="usuario" :filas="usuarios" v-bind="usr" nota="Los cajeros venden y cierran su caja. Los administradores ven todo y autorizan con su PIN."/>
       <Respaldos v-if="tab === 'respaldos'" :cfg="cfg" @guardar="guardar"/>
+      <Actualizaciones v-if="tab === 'actualizaciones'"/>
       <Auditoria v-if="tab === 'auditoria'"/>
     </div>`,
 };

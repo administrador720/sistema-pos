@@ -32,6 +32,7 @@ export const conUnidad = (n, unidad) => unidad === 'kg' ? kilos(n) : cantidadTxt
 export function valorLinea(precio, cantidad) { return Math.floor((precio * Math.round(Number(cantidad) * 1000) + 500) / 1000); }
 // Valor bruto de una línea del carrito: lo digitado en pesos («$5.000 de tomate») o precio × cantidad
 export function bruta(it) { return it.valor ? it.valor : valorLinea(it.precio, it.cantidad); }
+export function fmtBytes(n) { const mb = Number(n) / 1048576; return mb >= 1 ? mb.toFixed(mb >= 100 ? 0 : 1).replace('.', ',') + ' MB' : Math.round(Number(n) / 1024) + ' KB'; }
 export function porcentaje(n) { return n === null || n === undefined ? '—' : String(Number(n).toFixed(1)).replace('.', ',') + ' %'; }
 
 const pad = x => String(x).padStart(2, '0');

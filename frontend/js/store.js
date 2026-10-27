@@ -13,6 +13,9 @@ export const store = reactive({
   cat: { categorias: [], proveedores: [], impuestos: [], medios_pago: [], caja: null },
   turno: null, turnoEsMio: false, resumen: null,
   alertas: 0,
+  version: '',                // versión instalada (la informa el servidor)
+  actualizacion: null,        // última versión nueva encontrada (solo administrador)
+  pestanaConfig: '',          // pestaña de Configuración que se debe abrir
   tema: document.documentElement.getAttribute('data-theme') === 'dark' ? 'oscuro' : 'claro',
   escritorio: new URLSearchParams(location.search).has('escritorio') || leer('pos_escritorio', '') === '1',
   mini: false,
@@ -68,10 +71,25 @@ export async function refrescarAlertas() {
   if (!esAdmin()) { store.alertas = 0; return; }
   try { store.alertas = (await api.get('/api/inventario/alertas')).total; } catch (e) { /* no crítico */ }
 }
+// Busca una versión nueva (máximo cada 6 horas, sin molestar si no hay internet). Con `forzar` siempre consulta y propaga el error.
+export async function buscarActualizacion(forzar = false) {
+  if (!esAdmin()) return null;
+  try {
+    const guardado = JSON.parse(leer('pos_actualizacion', 'null'));
+    if (!forzar && guardado && Date.now() - guardado.ts < 6 * 3600 * 1000 && guardado.desde === store.version) {
+      store.actualizacion = guardado.r.hay_nueva ? guardado.r : null; return guardado.r;
+    }
+    const r = await api.post('/api/sistema/actualizaciones/buscar');
+    try { localStorage.setItem('pos_actualizacion', JSON.stringify({ ts: Date.now(), r, desde: store.version })); } catch (e) { /* */ }
+    store.actualizacion = r.hay_nueva ? r : null;
+    return r;
+  } catch (e) { if (forzar) throw e; return null; }
+}
 export async function iniciarSesionCargada() {
   store.usuario = await api.get('/api/auth/yo');
   await Promise.all([cargarConfig(), cargarCatalogos(), refrescarTurno()]);
   refrescarAlertas();
+  buscarActualizacion();
 }
 export function cerrarSesionLocal() {
   sesion.limpiar(); store.usuario = null; store.turno = null; store.bloqueado = false;

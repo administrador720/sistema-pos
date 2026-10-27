@@ -1,0 +1,117 @@
+name: Instalador de Windows
+# Construye el programa y el instalador en Windows, los PRUEBA (instala, actualiza encima, desinstala) y, si se pide,
+# los publica como versión nueva en GitHub: de ahí los descarga el botón «Buscar actualizaciones» del programa.
+#
+# Para publicar una versión nueva:
+#   1) cambie el número en el archivo VERSION (por ejemplo 1.2.0) y agregue sus notas arriba en CHANGELOG.md
+#   2) Actions → «Instalador de Windows» → Run workflow → marque «publicar»   (o suba una etiqueta v1.2.0)
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+    paths-ignore: ["docs/**", "README.md"]
+  workflow_dispatch:
+    inputs:
+      publicar:
+        description: "Publicar como versión nueva (usa el número de VERSION)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: instalador-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Versión
+        id: ver
+        shell: pwsh
+        run: |
+          $v = (Get-Content VERSION -Raw).Trim()
+          if ($v -notmatch '^\d+\.\d+\.\d+$') { throw "El archivo VERSION no es válido: «$v»" }
+          if ($env:GITHUB_REF -like 'refs/tags/v*' -and $env:GITHUB_REF_NAME -ne "v$v") { throw "La etiqueta $env:GITHUB_REF_NAME no coincide con VERSION ($v)" }
+          "version=$v" | Out-File -Append -FilePath $env:GITHUB_OUTPUT -Encoding ascii
+          Write-Host "Versión $v"
+
+      - name: Dependencias
+        run: python -m pip install -r backend/requirements-dev.txt pywebview pyserial pywin32 pyinstaller pillow
+
+      - name: Pruebas en Windows (reglas de negocio)
+        working-directory: backend
+        run: python -m pytest -q --ignore=tests/e2e
+
+      - name: Ícono (logo del negocio si existe installer/logo.png)
+        run: python scripts/hacer_icono.py
+
+      - name: Construir el programa (PyInstaller)
+        run: pyinstaller installer/pos.spec --noconfirm --distpath dist --workpath build
+
+      - name: Probar el programa empaquetado
+        shell: pwsh
+        run: ./scripts/ci/probar_exe.ps1 -Exe dist/POSSupermercado/POSSupermercado.exe -Captura "$env:RUNNER_TEMP/ventana.png"
+
+      - name: Componente WebView2 para equipos que no lo tengan
+        shell: pwsh
+        run: |
+          try { Invoke-WebRequest "https://go.microsoft.com/fwlink/p/?LinkId=2124703" -OutFile installer/MicrosoftEdgeWebview2Setup.exe -UseBasicParsing; (Get-Item installer/MicrosoftEdgeWebview2Setup.exe).Length }
+          catch { Write-Warning "No se pudo descargar WebView2: el instalador saldrá sin él. $_" }
+
+      - name: Construir el instalador (Inno Setup)
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress; }
+          if (-not (Test-Path $iscc)) { throw "No se encontró Inno Setup" }
+          & $iscc "/DVersion=${{ steps.ver.outputs.version }}" installer/instalador.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup falló ($LASTEXITCODE)" }
+          $exe = "dist/Instalador-POS-Supermercado-${{ steps.ver.outputs.version }}.exe"
+          $h = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
+          "$h  $(Split-Path $exe -Leaf)" | Out-File "$exe.sha256" -Encoding ascii
+          Get-ChildItem dist/*.exe*, dist/*.sha256 | ForEach-Object { "{0}  {1:N1} MB" -f $_.Name, ($_.Length / 1MB) }
+          Get-Content "$exe.sha256"
+
+      - name: Probar el instalador (instala, actualiza con el programa abierto, desinstala)
+        shell: pwsh
+        run: ./scripts/ci/probar_instalador.ps1 -Instalador "dist/Instalador-POS-Supermercado-${{ steps.ver.outputs.version }}.exe"
+
+      - name: Guardar archivos
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: instalador-windows
+          if-no-files-found: ignore
+          path: |
+            dist/Instalador-POS-Supermercado-*.exe
+            dist/Instalador-POS-Supermercado-*.sha256
+            ${{ runner.temp }}/ventana.png
+            ${{ runner.temp }}/instalacion.log
+
+      - name: Publicar la versión
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.publicar
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $v = "${{ steps.ver.outputs.version }}"
+          $texto = Get-Content CHANGELOG.md -Raw -Encoding utf8
+          $notas = "Versión $v"
+          if ($texto -match "(?ms)^## $([regex]::Escape($v))[^\r\n]*\r?\n(.*?)(?=^## |\z)") { $notas = $Matches[1].Trim() }
+          Set-Content -Path notas.md -Value $notas -Encoding utf8
+          $archivo = "dist/Instalador-POS-Supermercado-$v.exe"
+          gh release create "v$v" $archivo "$archivo.sha256" --title "POS Supermercado $v" --notes-file notas.md --target $env:GITHUB_SHA --latest
+          if ($LASTEXITCODE -ne 0) { throw "No se pudo crear la versión v$v (¿ya existe?)" }
+          Write-Host "Publicada: https://github.com/${{ github.repository }}/releases/tag/v$v"

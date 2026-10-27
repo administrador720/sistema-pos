@@ -19,6 +19,7 @@ from .. import models as m
 from ..core import ErrorNegocio
 from ..deps import DB, DBW, Admin
 from ..schemas import RestaurarIn
+from ..services import actualizaciones as act
 from ..services import respaldos as svc
 
 router = APIRouter(prefix="/api")
@@ -93,3 +94,30 @@ def abrir_exportado(body: AbrirIn, _: Admin):
     except OSError:
         return {"ok": False}
     return {"ok": True}
+
+
+# ───────────────────────────── Actualizaciones ─────────────────────────────
+@router.get("/sistema/version")
+def version(_: Admin):
+    ok, motivo = act.soportado()
+    return {"version": config.VERSION, "soportado": ok, "motivo": motivo, "descarga": act.estado()}
+
+
+@router.post("/sistema/actualizaciones/buscar")
+def buscar_actualizacion(_: Admin):
+    return act.buscar()
+
+
+@router.post("/sistema/actualizaciones/descargar")
+def descargar_actualizacion(_: Admin):
+    return act.iniciar_descarga()
+
+
+@router.get("/sistema/actualizaciones/estado")
+def estado_actualizacion(_: Admin):
+    return act.estado()
+
+
+@router.post("/sistema/actualizaciones/instalar")
+def instalar_actualizacion(adm: Admin):
+    return act.instalar(adm)

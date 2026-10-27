@@ -108,6 +108,9 @@ def inicializar():
         if fila is None:
             con.exec_driver_sql("INSERT INTO _version (id, version) VALUES (1, 0)")
         actual = fila[0] if fila else 0
+        if actual > len(MIGRACIONES):
+            raise RuntimeError(f"La base de datos es de una versión más nueva del programa (esquema {actual}; este programa "
+                               f"conoce hasta el {len(MIGRACIONES)}). Instale la versión más reciente en vez de abrirla con esta.")
         for n, migracion in enumerate(MIGRACIONES, start=1):
             if n > actual:
                 migracion(con)

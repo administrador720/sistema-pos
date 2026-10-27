@@ -28,6 +28,43 @@ if not getattr(sys, "frozen", False):
 from app import config  # noqa: E402
 
 log = logging.getLogger("pos.launcher")
+NOMBRE_MUTEX = "POSSupermercado"   # el instalador (AppMutex) lo usa para saber si el programa está abierto
+_mutex = None
+
+
+def avisar(texto: str, titulo: str | None = None):
+    """Muestra un mensaje al usuario. El .exe de Windows no tiene consola, así que los errores se ven en un cuadro."""
+    titulo = titulo or config.NOMBRE_APP
+    log.error("%s", texto)
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(0, texto, titulo, 0x10)  # type: ignore[attr-defined]
+            return
+        except Exception:  # noqa: BLE001
+            pass
+    print(texto, file=sys.stderr)
+
+
+def ya_hay_otra_instancia() -> bool:
+    """Windows: un solo programa abierto. Si ya hay uno, se trae su ventana al frente en vez de abrir otro."""
+    global _mutex
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+        k32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        _mutex = k32.CreateMutexW(None, False, NOMBRE_MUTEX)
+        if k32.GetLastError() != 183:  # ERROR_ALREADY_EXISTS
+            return False
+        u32 = ctypes.windll.user32  # type: ignore[attr-defined]
+        hwnd = u32.FindWindowW(None, config.NOMBRE_APP)
+        if hwnd:
+            u32.ShowWindow(hwnd, 9)  # SW_RESTORE
+            u32.SetForegroundWindow(hwnd)
+        return bool(hwnd)  # sin ventana visible (p. ej. modo navegador), se deja abrir otra pestaña
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def configurar_logs():
@@ -90,7 +127,15 @@ def abrir_ventana(url: str, pantalla_completa: bool) -> bool:
     try:
         webview.create_window(config.NOMBRE_APP, url + "?escritorio=1", width=1366, height=820, min_size=(1100, 700),
                               fullscreen=pantalla_completa, text_select=False)
-        webview.start()      # bloquea hasta que se cierra la ventana
+        opciones: dict = {}
+        if sys.platform == "win32":
+            # Solo WebView2 (Edge): el motor antiguo de Windows (IE) no ejecuta esta interfaz. Perfil por usuario de
+            # Windows y no privado, para que el tema y el último usuario se recuerden entre aperturas.
+            opciones = {"gui": "edgechromium", "private_mode": False, "storage_path": str(config.directorio_usuario() / "webview")}
+        try:
+            webview.start(**opciones)      # bloquea hasta que se cierra la ventana
+        except TypeError:                  # versión de pywebview sin alguna de las opciones
+            webview.start()
     except Exception as e:  # noqa: BLE001 - sin motor gráfico (WebView2/GTK/Qt) no se puede abrir la ventana nativa
         log.warning("No se pudo abrir la ventana de escritorio (%s): se usará el navegador", e)
         return False
@@ -106,6 +151,9 @@ def main() -> int:
     a = ap.parse_args()
     configurar_logs()
     log.info("Iniciando %s %s (datos en %s)", config.NOMBRE_APP, config.VERSION, config.directorio_datos())
+    if not a.sin_ventana and ya_hay_otra_instancia():
+        log.info("El programa ya está abierto: se trajo su ventana al frente.")
+        return 0
 
     url = f"http://127.0.0.1:{a.puerto}/"
     servidor = hilo = None
@@ -113,8 +161,17 @@ def main() -> int:
         log.info("Ya hay un POS en ejecución en el puerto %s: se abre otra ventana sobre el mismo.", a.puerto)
     else:
         if not puerto_disponible(a.puerto):
-            print(f"El puerto {a.puerto} está ocupado por otro programa. Use --puerto para elegir otro.", file=sys.stderr)
+            avisar(f"El puerto {a.puerto} está ocupado por otro programa y {config.NOMBRE_APP} no puede arrancar.\n\n"
+                   "Cierre ese programa o reinicie el computador.")
             return 2
+        try:  # se prepara la base de datos aquí para poder explicar bien cualquier problema (p. ej. base de una versión más nueva)
+            from app import db as db_mod
+            db_mod.configurar()
+            db_mod.inicializar()
+        except Exception as e:  # noqa: BLE001
+            log.exception("No se pudo abrir la base de datos")
+            avisar(f"No se pudo abrir la base de datos:\n\n{e}\n\nDetalles en: {config.directorio_datos() / 'pos.log'}")
+            return 3
         servidor, hilo = arrancar_servidor(a.puerto)
     print(f"{config.NOMBRE_APP} listo en {url}")
 
@@ -138,4 +195,11 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except SystemExit:
+        raise
+    except BaseException as error:  # noqa: BLE001 - cualquier fallo se explica en un cuadro (el .exe no tiene consola)
+        logging.getLogger("pos.launcher").exception("Fallo no controlado")
+        avisar(f"{config.NOMBRE_APP} no pudo iniciar:\n\n{error}\n\nDetalles en: {config.directorio_datos() / 'pos.log'}")
+        sys.exit(1)

@@ -1,6 +1,5 @@
 """Robustez: respaldos, intentos fallidos, atomicidad, concurrencia y corte de energía."""
 import os
-import signal
 import sqlite3
 import subprocess
 import sys
@@ -180,7 +179,7 @@ def _corte_de_energia(tienda, confirmar: bool):
     p = subprocess.Popen([sys.executable, "-c", codigo], stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, text=True)
     try:
         assert p.stdout.readline().strip() == "LISTO", p.stderr.read()
-        os.kill(p.pid, signal.SIGKILL)       # corte de luz: el proceso muere sin cerrar nada
+        p.kill()                             # corte de luz: el proceso muere sin cerrar nada (SIGKILL / TerminateProcess)
     finally:
         p.kill()
         p.wait()
