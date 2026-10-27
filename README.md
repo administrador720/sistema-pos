@@ -34,7 +34,26 @@ todo con teclado y lector de código de barras.
 
 ## Cómo empezar
 
-### En Windows (paso a paso)
+### En Windows: instalador (recomendado para la tienda)
+
+1. Entre a **<https://github.com/administrador720/sistema-pos/releases/latest>** y descargue **`Instalador-POS-Supermercado-….exe`** (en la sección *Assets*).
+2. Haga doble clic. Windows mostrará «Windows protegió su PC»: el instalador todavía no tiene firma digital (un certificado cuesta dinero cada año). Presione **Más información → Ejecutar de todas formas**. Es normal en programas sin firma.
+3. Siga los pasos (Siguiente → Instalar). Queda un **ícono «POS Supermercado» en el escritorio** y en el menú Inicio.
+4. La primera vez le pide los datos del negocio y crea al administrador.
+
+La información (productos, ventas, usuarios) se guarda en `C:\ProgramData\POSSupermercado` y **no se pierde** al actualizar ni al desinstalar.
+
+### Actualizar el programa
+
+* **Con un botón:** *Configuración → Actualizaciones → Buscar actualizaciones*. El programa también avisa solo (arriba, «Versión X disponible») cuando abre y hay internet. Descarga la versión nueva, **comprueba que no esté dañada**, hace un **respaldo** de la base de datos y se instala: se cierra y vuelve a abrir en un minuto. Windows pedirá permiso de administrador. Hágalo cuando no haya una venta en curso.
+* **A mano:** descargue el instalador nuevo desde la página de versiones y ejecútelo encima: actualiza sin tocar los datos.
+![Actualizaciones](docs/img/actualizaciones.png)
+
+* Un programa viejo **se niega a abrir** una base de datos de una versión más nueva (para no dañarla).
+
+> **Quien mantiene el programa — publicar una versión nueva:** 1) cambie el número en el archivo `VERSION` y escriba las novedades arriba en `CHANGELOG.md`; 2) en GitHub: *Actions → Instalador de Windows → Run workflow* y marque **publicar** (o suba una etiqueta `v1.2.0`). El flujo construye, **prueba el instalador en un Windows real** (instalar, actualizar encima con el programa abierto, desinstalar) y publica la versión; desde ese momento los programas instalados la ofrecen.
+
+### En Windows desde el código (para probar o desarrollar)
 
 1. **Instale Python** desde <https://www.python.org/downloads/>. Durante la instalación **marque la casilla "Add python.exe to PATH"**. Se necesita la versión 3.11 o superior.
 2. **Descargue el programa**: en GitHub entre al repositorio, botón verde **Code → Download ZIP**
@@ -174,9 +193,12 @@ Con 30.000 productos y 943.000 líneas de venta (un año a 300 ventas diarias):
 
 ### Empaquetado (Windows)
 
-`scripts\build_windows.bat` genera `dist\POSSupermercado\` con PyInstaller y, si tiene Inno Setup 6, el instalador `.exe`.
-La ventana usa Microsoft Edge WebView2 (incluido en Windows 10/11 actualizados).
-> **Estado:** el empaquetado se verificó construyendo y arrancando el ejecutable en Linux; los scripts de **Windows** (`.bat`, `.iss`) y la ventana nativa **no se han probado en Windows**.
+El instalador se construye solo en GitHub Actions (`.github/workflows/release.yml`) en un Windows real; a mano: `scripts\build_windows.bat` (necesita Python y, para el `.exe` instalador, Inno Setup 6).
+La ventana usa Microsoft Edge WebView2 (viene en Windows 10/11 actualizados; si falta, el instalador lo instala).
+
+**Ícono del escritorio:** hoy es un ícono genérico (una tiendita verde). Para usar **el logo del negocio**: guarde el PNG como `installer/logo.png` (mejor cuadrado o con fondo transparente) y construya de nuevo; `scripts/hacer_icono.py` lo convierte en `.ico` (todos los tamaños de Windows).
+
+![Ícono](docs/img/icono.png)
 
 ## Seguridad
 
