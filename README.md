@@ -80,6 +80,12 @@ cd backend && ../.venv/bin/python -m app.seed_demo --forzar   # opcional: datos 
 | `F4` / `Supr` | quitar línea | | `Esc` | cancelar venta |
 | `F5` | descuento | | `↑` `↓` `+` `-` | elegir línea / cantidad |
 
+## Olvidé mi contraseña
+
+* **Es cajero:** el administrador la cambia en *Configuración → Usuarios* (clic en el usuario → nueva contraseña o PIN).
+* **Es el administrador:** cierre el programa y haga doble clic en **`restablecer_clave.bat`**. Muestra los usuarios, pregunta cuál restablecer y pide la nueva contraseña (y, si quiere, un PIN nuevo). Hay que estar en el computador donde está instalado; queda registrado en la auditoría.
+* Para ingresar se usa el **usuario** (por ejemplo `admin`), no el nombre. Tras 5 intentos fallidos el ingreso se bloquea 5 minutos.
+
 ## Datos, respaldos y recuperación
 
 * Base de datos: un archivo SQLite en `C:\ProgramData\POSSupermercado\data\pos.db` (Windows) o `~/.local/share/pos-supermercado/data/` (Linux). Variable `POS_DATA_DIR` para cambiarla.

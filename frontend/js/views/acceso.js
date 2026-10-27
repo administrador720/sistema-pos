@@ -42,7 +42,7 @@ export const Setup = {
             <h3>2. Administrador del sistema</h3>
             <div class="grid c2">
               <div class="field"><label>Su nombre</label><input class="input" v-model="f.nombre" placeholder="Ana Gómez"></div>
-              <div class="field"><label>Usuario</label><input class="input" v-model="f.usuario" autocapitalize="off"></div>
+              <div class="field"><label>Usuario para ingresar</label><input class="input" v-model="f.usuario" autocapitalize="off"><span class="hint">Con este usuario (no con su nombre) entrará siempre. Anótelo.</span></div>
               <div class="field"><label>Contraseña (mín. 6 caracteres)</label><input class="input" type="password" v-model="f.password" autocomplete="new-password"></div>
               <div class="field"><label>Repetir contraseña</label><input class="input" type="password" v-model="f.password2" autocomplete="new-password"></div>
             </div>
@@ -81,10 +81,14 @@ export const Login = {
         <h1>Iniciar sesión</h1>
         <p class="muted" style="margin:6px 0 22px">Ingrese con su usuario y contraseña.</p>
         <form class="stack" @submit.prevent="entrar">
-          <div class="field"><label>Usuario</label><input class="input lg" v-model="usuario" autocapitalize="off" autocomplete="username" :autofocus="!usuario"></div>
+          <div class="field"><label>Usuario</label><input class="input lg" v-model="usuario" autocapitalize="off" autocomplete="username" :autofocus="!usuario">
+            <span class="hint">El usuario que eligió al configurar (por ejemplo «admin»), no su nombre.</span></div>
           <div class="field"><label>Contraseña</label><input class="input lg" type="password" v-model="password" autocomplete="current-password" :autofocus="!!usuario"></div>
           <div class="alert danger" v-if="error">{{ error }}</div>
           <button class="btn primary lg block" :disabled="!usuario || !password || cargando">{{ cargando ? 'Ingresando…' : 'Ingresar' }}</button>
+          <details class="small muted"><summary style="cursor:pointer">¿Olvidó su contraseña?</summary>
+            <p style="margin-top:8px">Si es cajero, pídale al administrador que la cambie en <b>Configuración → Usuarios</b>.</p>
+            <p style="margin-top:6px">Si es el administrador: cierre el programa y abra <b>restablecer_clave.bat</b> en la carpeta del programa. Necesita estar en este computador.</p></details>
         </form>
       </div>
     </div>`,
