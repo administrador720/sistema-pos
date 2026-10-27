@@ -33,8 +33,8 @@ PrivilegesRequired=admin
 WizardStyle=modern
 ShowLanguageDialog=no
 LanguageDetectionMethod=none
-; Si el programa está abierto (al actualizar), el instalador lo cierra y lo vuelve a abrir al terminar
-AppMutex=POSSupermercado
+; Si el programa está abierto (al actualizar), el instalador lo cierra con el Administrador de reinicio de Windows y se
+; vuelve a abrir al terminar (/RELANZAR=1). No se usa AppMutex: en una instalación silenciosa cancelaría la actualización.
 CloseApplications=yes
 RestartApplications=no
 

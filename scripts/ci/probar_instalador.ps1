@@ -33,7 +33,7 @@ Write-Host "== 1. Instalación silenciosa"
 Instalar @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=`"$destino`"", "/LOG=`"$registro`"")
 $exe = Join-Path $destino "POSSupermercado.exe"
 if (-not (Test-Path $exe)) { throw "No se instaló $exe" }
-foreach ($f in "VERSION", "_internal") { if (-not (Test-Path (Join-Path $destino $f))) { Write-Host "  (aviso) no está $f en la carpeta de instalación" } }
+if (-not (Test-Path (Join-Path $destino "_internal\VERSION"))) { throw "Falta el archivo VERSION dentro de la instalación" }
 $icono = Join-Path ([Environment]::GetFolderPath("CommonDesktopDirectory")) "POS Supermercado.lnk"
 if (-not (Test-Path $icono)) { throw "No se creó el ícono del escritorio: $icono" }
 Write-Host "  Ícono del escritorio: $icono"

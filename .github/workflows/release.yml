@@ -76,7 +76,7 @@ jobs:
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress; }
           if (-not (Test-Path $iscc)) { throw "No se encontró Inno Setup" }
-          & $iscc "/DVersion=${{ steps.ver.outputs.version }}" installer/instalador.iss
+          & $iscc /Q "/DVersion=${{ steps.ver.outputs.version }}" installer/instalador.iss
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup falló ($LASTEXITCODE)" }
           $exe = "dist/Instalador-POS-Supermercado-${{ steps.ver.outputs.version }}.exe"
           $h = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
