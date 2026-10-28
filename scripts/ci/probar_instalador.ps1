@@ -25,7 +25,10 @@ function Esperar-Salud([int]$segundos = 60) {
   return $null
 }
 function Instalar($argumentos) {
-  $p = Start-Process -FilePath $Instalador -ArgumentList $argumentos -Wait -PassThru
+  # No se usa -Wait: en PowerShell espera también a los programas que el instalador abre al terminar (el POS reabierto)
+  $p = Start-Process -FilePath $Instalador -ArgumentList $argumentos -PassThru
+  $null = $p.Handle   # sin esto, ExitCode puede quedar vacío
+  if (-not $p.WaitForExit(300000)) { $p.Kill(); if (Test-Path $registro) { Get-Content $registro -Tail 60 }; throw "El instalador no terminó en 5 minutos" }
   if ($p.ExitCode -ne 0) { if (Test-Path $registro) { Get-Content $registro -Tail 40 }; throw "El instalador terminó con código $($p.ExitCode)" }
 }
 
@@ -64,7 +67,9 @@ Start-Sleep -Seconds 2
 
 Write-Host "== 4. Desinstalar (los datos deben quedar)"
 $desinst = Join-Path $destino "unins000.exe"
-$p = Start-Process -FilePath $desinst -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait -PassThru
+$p = Start-Process -FilePath $desinst -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -PassThru
+$null = $p.Handle
+if (-not $p.WaitForExit(120000)) { $p.Kill(); throw "El desinstalador no terminó en 2 minutos" }
 if ($p.ExitCode -ne 0) { throw "El desinstalador terminó con código $($p.ExitCode)" }
 Start-Sleep -Seconds 2
 if (Test-Path $exe) { throw "El programa sigue instalado después de desinstalar" }
