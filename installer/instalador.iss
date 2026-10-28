@@ -56,7 +56,7 @@ Source: "MicrosoftEdgeWebview2Setup.exe"; DestDir: "{tmp}"; Flags: deleteafterin
 
 [Dirs]
 ; La base de datos y los respaldos viven aquí y NO se borran al desinstalar. Todos los usuarios de Windows (los cajeros) deben poder escribir.
-Name: "{commonappdata}\POSSupermercado"; Permissions: users-modify
+Name: "{commonappdata}\POSSupermercado"; Permissions: users-modify; Flags: uninsneveruninstall
 
 [Icons]
 Name: "{group}\{#Nombre}"; Filename: "{app}\{#Exe}"; Comment: "Punto de venta"
