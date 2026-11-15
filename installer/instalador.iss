@@ -67,8 +67,15 @@ Name: "{autodesktop}\{#Nombre}"; Filename: "{app}\{#Exe}"; Comment: "Punto de ve
 ; La ventana del programa necesita Microsoft Edge WebView2 (ya viene en Windows 10/11 actualizados; si falta, se instala)
 Filename: "{tmp}\MicrosoftEdgeWebview2Setup.exe"; Parameters: "/silent /install"; StatusMsg: "Instalando el componente de ventana (WebView2)..."; Flags: waituntilterminated; Check: not WebView2Instalado
 #endif
+; Celulares: permite que el programa reciba conexiones de la red local (solo redes «Privadas» de Windows). El servidor para
+; celulares solo se abre cuando el administrador lo activa en Configuración → Celulares.
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""POS Supermercado (celulares)"""; Flags: runhidden waituntilterminated; StatusMsg: "Configurando el firewall de Windows..."
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""POS Supermercado (celulares)"" dir=in action=allow program=""{app}\{#Exe}"" enable=yes profile=private"; Flags: runhidden waituntilterminated
 ; runasoriginaluser: el programa NO debe quedar corriendo como administrador (crearía archivos que los cajeros no podrían modificar)
 Filename: "{app}\{#Exe}"; Description: "Abrir {#Nombre}"; Flags: nowait postinstall runasoriginaluser; Check: DebeAbrir
+
+[UninstallRun]
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""POS Supermercado (celulares)"""; Flags: runhidden; RunOnceId: "QuitarReglaFirewall"
 
 [Code]
 const

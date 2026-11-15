@@ -166,12 +166,92 @@ const Actualizaciones = {
     </div>`,
 };
 
+// ───────────────────────── Celulares (app Android por la red local) ─────────────────────────
+const Celulares = {
+  setup() {
+    const est = ref(null), cargando = ref(true), vinc = ref(null), segundos = ref(0), qrActivo = ref(0), cambiando = ref(false);
+    let reloj = null, sondeo = null;
+    async function cargar() { try { est.value = await api.get('/api/movil/estado'); } catch (e) { errorToast(e); } cargando.value = false; }
+    async function alternar() {
+      const activar = !est.value.habilitado;
+      if (activar && !await confirmar('¿Conectar celulares a esta red?', 'El programa empezará a atender, además de esta ventana, a los celulares de su red Wi-Fi.\n\nSolo entrarán celulares que usted vincule aquí, solo como administrador, y solo para consultar, contar inventario, registrar compras, vender y ver el panel.', { textoOk: 'Sí, activar' })) return;
+      cambiando.value = true;
+      try { await api.post('/api/movil/habilitar', { habilitado: activar }); toast(activar ? 'Celulares activados.' : 'Celulares apagados.', 'ok'); } catch (e) { errorToast(e); }
+      cambiando.value = false; await cargar();
+    }
+    function cerrarVinculo() { clearInterval(reloj); clearInterval(sondeo); vinc.value = null; }
+    async function vincular() {
+      try { vinc.value = await api.post('/api/movil/codigo'); } catch (e) { return errorToast(e); }
+      qrActivo.value = 0; segundos.value = vinc.value.vigencia_s;
+      const antes = est.value.dispositivos.length;
+      reloj = setInterval(() => { segundos.value -= 1; if (segundos.value <= 0) cerrarVinculo(); }, 1000);
+      sondeo = setInterval(async () => {   // cuando el celular canjea el código, la lista crece
+        try { const e2 = await api.get('/api/movil/estado'); if (e2.dispositivos.length > antes) { est.value = e2; cerrarVinculo(); toast('Celular vinculado: ' + e2.dispositivos[e2.dispositivos.length - 1].nombre, 'ok', 7000); } } catch (e) { /* */ }
+      }, 2500);
+    }
+    async function desvincular(d) {
+      if (!await confirmar('¿Desvincular «' + d.nombre + '»?', 'Ese celular dejará de poder entrar. Para volver a usarlo hay que vincularlo de nuevo.', { peligro: true, textoOk: 'Desvincular' })) return;
+      try { await api.del('/api/movil/dispositivos/' + d.id); toast('Celular desvinculado.', 'ok'); await cargar(); } catch (e) { errorToast(e); }
+    }
+    onMounted(cargar); onBeforeUnmount(cerrarVinculo);
+    const mmss = computed(() => `${Math.floor(segundos.value / 60)}:${String(segundos.value % 60).padStart(2, '0')}`);
+    return { est, cargando, vinc, qrActivo, mmss, cambiando, alternar, vincular, cerrarVinculo, desvincular, fechaHora, store };
+  },
+  template: `
+    <div class="stack lg" style="max-width:820px" v-if="est">
+      <div class="card stack">
+        <div class="row between"><div><h3>Conectar celulares a esta red</h3>
+          <div class="muted small">La app de Android se conecta por el Wi-Fi de la tienda. No usa internet.</div></div>
+          <span class="chip" :class="est.activo ? 'ok' : est.habilitado ? 'warn' : ''" style="height:30px">{{ est.activo ? 'Activo' : est.habilitado ? 'Pendiente' : 'Apagado' }}</span></div>
+        <div class="alert danger" v-if="est.error"><Icono n="alerta"/>{{ est.error }}</div>
+        <div class="row"><button class="btn" :class="est.habilitado ? '' : 'primary'" :disabled="cambiando" @click="alternar">
+          <Icono :n="est.habilitado ? 'candado' : 'celular'"/> {{ est.habilitado ? 'Apagar el acceso de celulares' : 'Activar el acceso de celulares' }}</button></div>
+        <p class="hint">Mientras esté activo, solo entran celulares que usted vincule aquí y únicamente con el usuario administrador. Anular ventas, respaldos, usuarios y ajustes se hacen solo en el computador.</p>
+      </div>
+
+      <template v-if="est.habilitado">
+        <div class="card stack">
+          <div class="row between"><div><h3>Celulares vinculados</h3><div class="muted small">Dirección de este computador: <b>{{ est.direcciones.length ? est.direcciones.join(' · ') : 'sin red' }}</b> (puerto {{ est.puerto }})</div></div>
+            <button class="btn primary" @click="vincular"><Icono n="mas"/> Vincular un celular</button></div>
+          <div class="table-wrap"><table class="t compact"><thead><tr><th>Celular</th><th>Vinculado</th><th>Último uso</th><th></th></tr></thead><tbody>
+            <tr v-for="d in est.dispositivos" :key="d.id"><td><b>{{ d.nombre }}</b></td><td>{{ fechaHora(d.creado_en) }}</td>
+              <td>{{ d.ultimo_uso ? fechaHora(d.ultimo_uso) + ' · ' + d.ultima_ip : '—' }}</td>
+              <td class="actions"><button class="btn sm ghost" @click="desvincular(d)" title="Desvincular"><Icono n="prohibido"/> Desvincular</button></td></tr>
+            <tr v-if="!est.dispositivos.length"><td colspan="4" class="empty">Todavía no hay celulares vinculados.</td></tr></tbody></table></div>
+        </div>
+
+        <div class="card stack">
+          <h3>Cómo instalar la app en el celular</h3>
+          <ol class="small" style="padding-left:18px;line-height:1.7">
+            <li>Descargue el archivo <b>POS-Movil-….apk</b> de la página de versiones (<b>{{ est.url_apk }}</b>) y ábralo en el celular. Android pedirá permitir instalar desde esa fuente.</li>
+            <li>Conecte el celular al <b>mismo Wi-Fi</b> que este computador.</li>
+            <li>Aquí presione <b>Vincular un celular</b>, y en la app elija <b>Escanear el QR</b>. Después entre con su usuario administrador.</li>
+          </ol>
+          <p class="hint">Si no conecta: revise que el Wi-Fi sea el mismo, que Windows tenga esa red como «Privada», y que la dirección del computador no haya cambiado (conviene reservarle una fija en el router).</p>
+        </div>
+      </template>
+
+      <Modal v-if="vinc" titulo="Vincular un celular" ancho="sm" @cerrar="cerrarVinculo">
+        <div class="stack center">
+          <div class="seg" v-if="vinc.qrs.length > 1" style="align-self:center"><button v-for="(q, i) in vinc.qrs" :key="q.direccion" :class="{ on: qrActivo === i }" @click="qrActivo = i">{{ q.direccion }}</button></div>
+          <div v-html="vinc.qrs[qrActivo].svg" style="width:240px;margin:0 auto"></div>
+          <div class="muted small">En la app: <b>Escanear el QR</b>. O escriba la dirección y este código:</div>
+          <div class="small">Dirección: <b>{{ vinc.qrs[qrActivo].direccion }}:{{ vinc.puerto }}</b></div>
+          <div class="num" style="font-size:40px;font-weight:700;letter-spacing:.2em">{{ vinc.codigo }}</div>
+          <div class="muted small">Vale {{ mmss }} y se puede usar una sola vez.</div>
+        </div>
+        <template #pie><button class="btn" @click="cerrarVinculo">Cerrar</button></template>
+      </Modal>
+    </div>
+    <div v-else class="empty">Cargando…</div>`,
+};
+
 // ───────────────────────── Configuración ─────────────────────────
 export const Configuracion = {
-  components: { Crud, Auditoria, Respaldos, Actualizaciones },
+  components: { Crud, Auditoria, Respaldos, Actualizaciones, Celulares },
   setup() {
     const tab = ref(store.pestanaConfig || 'negocio'), cfg = reactive({}), cargando = ref(true), usuarios = ref([]), probando = ref(false);
-    const TABS = [['negocio', 'Negocio'], ['ventas', 'Ventas y caja'], ['cajon', 'Cajón monedero'], ['impuestos', 'Impuestos'], ['medios', 'Medios de pago'], ['catalogos', 'Categorías y proveedores'], ['usuarios', 'Usuarios'], ['respaldos', 'Respaldos'], ['actualizaciones', 'Actualizaciones'], ['auditoria', 'Auditoría']];
+    const TABS = [['negocio', 'Negocio'], ['ventas', 'Ventas y caja'], ['cajon', 'Cajón monedero'], ['impuestos', 'Impuestos'], ['medios', 'Medios de pago'], ['catalogos', 'Categorías y proveedores'], ['usuarios', 'Usuarios'], ['respaldos', 'Respaldos'], ['celulares', 'Celulares'], ['actualizaciones', 'Actualizaciones'], ['auditoria', 'Auditoría']];
     store.pestanaConfig = '';
     async function cargar() { await cargarConfig(); Object.assign(cfg, store.config); await cargarCatalogos(); cargando.value = false; }
     async function cargarUsuarios() { try { usuarios.value = await api.get('/api/usuarios'); } catch (e) { errorToast(e); } }
@@ -279,6 +359,7 @@ export const Configuracion = {
         <div><h3 style="margin-bottom:10px">Proveedores</h3><Crud singular="proveedor" :filas="store.cat.proveedores" v-bind="proveedores"/></div></div>
       <Crud v-if="tab === 'usuarios'" singular="usuario" :filas="usuarios" v-bind="usr" nota="Los cajeros venden y cierran su caja. Los administradores ven todo y autorizan con su PIN."/>
       <Respaldos v-if="tab === 'respaldos'" :cfg="cfg" @guardar="guardar"/>
+      <Celulares v-if="tab === 'celulares'"/>
       <Actualizaciones v-if="tab === 'actualizaciones'"/>
       <Auditoria v-if="tab === 'auditoria'"/>
     </div>`,

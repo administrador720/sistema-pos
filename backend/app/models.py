@@ -444,6 +444,18 @@ class Auditoria(Base):
     usuario: Mapped[Usuario | None] = relationship(foreign_keys=[usuario_id])
 
 
+class Dispositivo(Base):
+    """Celular vinculado: guarda solo el hash de su llave; sin ella la red local no puede usar la API."""
+    __tablename__ = "dispositivos"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    nombre: Mapped[str] = mapped_column(String(80))
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    creado_en: Mapped[datetime] = mapped_column(DateTime)
+    ultimo_uso: Mapped[datetime | None] = mapped_column(DateTime)
+    ultima_ip: Mapped[str | None] = mapped_column(String(45))
+    revocado_en: Mapped[datetime | None] = mapped_column(DateTime)
+
+
 class Respaldo(Base):
     __tablename__ = "respaldos"
     id: Mapped[int] = mapped_column(primary_key=True)

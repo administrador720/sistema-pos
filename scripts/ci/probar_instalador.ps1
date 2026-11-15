@@ -43,6 +43,10 @@ Write-Host "  Ícono del escritorio: $icono"
 $inicio = Get-ChildItem (Join-Path ([Environment]::GetFolderPath("CommonPrograms")) "POS Supermercado") -ErrorAction SilentlyContinue
 Write-Host "  Menú Inicio: $($inicio.Name -join ', ')"
 if (-not (Test-Path $datos)) { throw "No se creó la carpeta de datos $datos" }
+$regla = "POS Supermercado (celulares)"
+netsh advfirewall firewall show rule name="$regla" | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "No se creó la regla de firewall «$regla»" }
+Write-Host "  Regla de firewall para celulares: creada"
 $cuenta = (Get-Acl $datos).Access | Where-Object { $_.IdentityReference -match "Users|Usuarios" } | Select-Object -First 1
 Write-Host "  Permisos de la carpeta de datos: $($cuenta.IdentityReference) $($cuenta.FileSystemRights)"
 
@@ -75,4 +79,6 @@ Start-Sleep -Seconds 2
 if (Test-Path $exe) { throw "El programa sigue instalado después de desinstalar" }
 if (Test-Path $icono) { throw "El ícono del escritorio no se quitó" }
 if (-not (Test-Path $datos)) { throw "La desinstalación borró la carpeta de datos (no debe)" }
+netsh advfirewall firewall show rule name="$regla" | Out-Null
+if ($LASTEXITCODE -eq 0) { throw "La regla de firewall «$regla» no se quitó al desinstalar" }
 Write-Host "Instalador OK: instala, crea íconos, actualiza con el programa abierto y desinstala conservando los datos."

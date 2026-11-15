@@ -216,6 +216,7 @@ DEFECTOS: dict[str, str] = {
     "dias_cobertura_sugerido": "7",
     "conteo_recordatorio_dias": "3",
     "tema": "claro",
+    "acceso_movil": "0",  # 1 = el programa atiende a los celulares vinculados en la red local (se cambia en Celulares)
 }
 # Claves que cualquier usuario autenticado puede leer (el resto solo el administrador)
 CLAVES_PUBLICAS = {"negocio_nombre", "negocio_nit", "negocio_direccion", "negocio_telefono", "negocio_logo",

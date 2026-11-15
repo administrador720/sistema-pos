@@ -28,7 +28,12 @@ def _chromium():
 def servidor(tmp_path_factory):
     pytest.importorskip("playwright")
     datos = tmp_path_factory.mktemp("pos-e2e")
-    env = {**os.environ, "POS_DATA_DIR": str(datos), "POS_EXPORT_DIR": str(datos / "exportes"), "POS_SIN_JOBS": "1", "PYTHONPATH": str(BACKEND)}
+    with socket.socket() as sm:
+        sm.bind(("127.0.0.1", 0))
+        puerto_movil = sm.getsockname()[1]
+    # el servidor de celulares de las pruebas solo escucha en este computador y dice tener una dirección de red fija
+    env = {**os.environ, "POS_DATA_DIR": str(datos), "POS_EXPORT_DIR": str(datos / "exportes"), "POS_SIN_JOBS": "1", "PYTHONPATH": str(BACKEND),
+           "POS_PUERTO_MOVIL": str(puerto_movil), "POS_HOST_MOVIL": "127.0.0.1", "POS_DIRECCIONES_MOVIL": "192.168.1.20"}
     subprocess.run([sys.executable, "-m", "app.seed_demo", "--dias", "4", "--ventas-dia", "14"], cwd=BACKEND, env=env, check=True, capture_output=True)
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
@@ -82,3 +87,4 @@ def entrar(pg, usuario, password):
     pg.fill("input[type=password]", password)
     pg.keyboard.press("Enter")
     pg.wait_for_selector(".sidebar", timeout=10000)
+    pg.wait_for_function("location.hash && location.hash !== '#/'", timeout=10000)   # el login termina llevando a su pantalla inicial

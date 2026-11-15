@@ -74,6 +74,13 @@ def dir_exportes() -> Path:
     return base
 
 
+def dir_movil() -> Path:
+    """Páginas de la app del celular (también se sirven en /m/ para probarlas desde el navegador del teléfono)."""
+    if getattr(sys, "frozen", False):
+        return Path(getattr(sys, "_MEIPASS", ".")) / "movil"
+    return Path(__file__).resolve().parents[2] / "movil" / "www"
+
+
 def dir_frontend() -> Path:
     """Frontend estático; funciona tanto en desarrollo como empaquetado con PyInstaller."""
     if getattr(sys, "frozen", False):
@@ -82,4 +89,9 @@ def dir_frontend() -> Path:
 
 
 PUERTO = int(os.environ.get("POS_PUERTO", "8765"))
-HOST = "127.0.0.1"  # solo local: nunca exponer a la red
+HOST = "127.0.0.1"  # la ventana del programa: solo este computador
+# Segundo servidor, SOLO mientras el administrador activa «Celulares»: atiende a la red local con reglas mucho más estrictas
+# (celulares vinculados, API reducida). La ventana del programa nunca se abre a la red.
+PUERTO_MOVIL = int(os.environ.get("POS_PUERTO_MOVIL", "8766"))
+HOST_MOVIL = os.environ.get("POS_HOST_MOVIL", "0.0.0.0")
+API_MOVIL = 1  # versión del protocolo entre el programa y la app del celular

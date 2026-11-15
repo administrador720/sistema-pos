@@ -1,7 +1,7 @@
 """Configuración inicial, inicio de sesión, autorización por PIN y usuarios."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Header
+from fastapi import APIRouter, Header, Request
 from sqlalchemy import func, select
 
 from .. import config
@@ -39,7 +39,7 @@ def setup(body: SetupIn, db: DBW):
 
 
 @router.post("/auth/login")
-def login(body: LoginIn, db: DBW):
+def login(body: LoginIn, request: Request, db: DBW):
     clave = f"login:{body.usuario.strip().lower()}"
     limitador.revisar(clave)
     u = db.scalars(select(m.Usuario).where(m.Usuario.usuario == body.usuario.strip().lower())).first()
@@ -47,6 +47,8 @@ def login(body: LoginIn, db: DBW):
         limitador.fallo(clave)
         raise ErrorNegocio("Usuario o contraseña incorrectos.", 401, "CREDENCIALES")
     limitador.exito(clave)
+    if getattr(request.state, "movil", False) and u.rol != "admin":
+        raise ErrorNegocio("La app del celular es solo para el administrador.", 403, "SOLO_ADMIN_MOVIL")
     token = crear_sesion(db, u)
     db.commit()
     return {"token": token, "usuario": usuario_dict(u)}

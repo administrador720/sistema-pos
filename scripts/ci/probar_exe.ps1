@@ -61,6 +61,24 @@ try {
   Write-Host "Respaldo creado: $($rs.archivo)"
   Write-Host "Jornada de prueba OK (contraseñas, SQLite, recibo PDF, Excel, respaldo)."
 
+  # celulares: el servidor para la red local abre en su puerto, exige la llave del celular y se apaga
+  $est = Llamar GET "/api/movil/estado" $null $t
+  $pm = $est.puerto
+  $hab = Llamar POST "/api/movil/habilitar" @{ habilitado = $true } $t
+  if (-not $hab.activo) { throw "El servidor para celulares no quedó activo" }
+  $ips = (Llamar GET "/api/movil/estado" $null $t).direcciones
+  Write-Host "Celulares: activo en el puerto $pm, direcciones: $($ips -join ', ')"
+  $dir = if ($ips.Count -gt 0) { $ips[0] } else { "127.0.0.1" }
+  $info = Invoke-RestMethod "http://${dir}:$pm/api/movil/info" -TimeoutSec 10
+  if (-not $info.ok) { throw "El servidor para celulares no responde por la red" }
+  try { Invoke-WebRequest "http://${dir}:$pm/api/productos" -UseBasicParsing -TimeoutSec 10 | Out-Null; throw "La API respondió sin la llave del celular" }
+  catch { if ($_.Exception.Response -and [int]$_.Exception.Response.StatusCode -eq 401) { Write-Host "  Sin llave: 401 (correcto)" } else { throw } }
+  $cod = Llamar POST "/api/movil/codigo" $null $t
+  $viv = Invoke-RestMethod "http://${dir}:$pm/api/movil/vincular" -Method Post -ContentType "application/json" -Body (@{ codigo = $cod.codigo; nombre = "CI" } | ConvertTo-Json) -TimeoutSec 10
+  if (-not $viv.token) { throw "No se pudo vincular un celular de prueba" }
+  Write-Host "  Celular vinculado y API reducida OK."
+  Llamar POST "/api/movil/habilitar" @{ habilitado = $false } $t | Out-Null
+
   # ventana de escritorio (WebView2): el proceso debe tener una ventana con el nombre del programa
   $titulo = ""
   for ($i = 0; $i -lt 40; $i++) {

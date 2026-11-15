@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import Depends, Header
+from fastapi import Depends, Header, Request
 from sqlalchemy.orm import Session
 
 from . import db as db_mod
@@ -21,7 +21,7 @@ def _token(authorization: str | None) -> str | None:
     return None
 
 
-def usuario_actual(authorization: Annotated[str | None, Header()] = None) -> m.Usuario:
+def usuario_actual(request: Request, authorization: Annotated[str | None, Header()] = None) -> m.Usuario:
     token = _token(authorization)
     if not token:
         raise ErrorNegocio("Inicie sesión para continuar.", 401, "NO_AUTENTICADO")
@@ -32,6 +32,8 @@ def usuario_actual(authorization: Annotated[str | None, Header()] = None) -> m.U
         s.close()
     if not u:
         raise ErrorNegocio("La sesión expiró. Inicie sesión de nuevo.", 401, "NO_AUTENTICADO")
+    if getattr(request.state, "movil", False) and u.rol != "admin":
+        raise ErrorNegocio("La app del celular es solo para el administrador.", 403, "SOLO_ADMIN_MOVIL")
     return u
 
 
