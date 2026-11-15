@@ -602,6 +602,13 @@ export const Caja = {
     function tecla(e) {
       if (document.querySelector('.overlay') || store.bloqueado) return;
       const k = e.key;
+      // Un botón del carrito (+, −, ×) que quedó con el foco tras un clic NO debe recibir lo que escribe el lector:
+      // el Enter final lo «apretaría» y sumaría una unidad al producto anterior. La tecla pasa al campo de escaneo.
+      const foco = document.activeElement;
+      if (foco && foco.tagName === 'BUTTON' && foco.closest('.cart')) {
+        foco.blur(); inScan.value?.focus();
+        if (k === 'Enter' || k === ' ') e.preventDefault();
+      }
       const mapa = { F1: abrirRapidos, F2: () => { buscarInicial.value = ''; dlg.value = 'buscar'; }, F3: abrirCantidad, F4: () => quitar(), F5: abrirDescuento, F6: abrirSuspender,
         F7: abrirRetomar, F8: () => { dlg.value = 'ventas'; }, F12: () => { dlg.value = 'mov'; }, F9: () => abrirCobro('efectivo'), F10: () => abrirCobro('banco'), F11: () => abrirCobro('mixto'), Escape: cancelarVenta };
       if (mapa[k]) { e.preventDefault(); mapa[k](); return; }
@@ -651,7 +658,7 @@ export const Caja = {
                   <td><b>{{ it.nombre }}</b><div class="xs muted">{{ it.codigo }}<span v-if="it.descuento" class="danger"> · desc. {{ peso(it.descuento) }}</span></div></td>
                   <td class="center">
                     <span v-if="it.unidad === 'kg'" class="qtybox kg" @click.stop="sel = i; abrirCantidad()" title="Corregir el peso (F3)"><b>{{ kilos(it.cantidad) }}</b><button tabindex="-1"><Icono n="lapiz"/></button></span>
-                    <span v-else class="qtybox"><button @click.stop="cambiarCant(i, -1)" tabindex="-1">−</button><b>{{ it.cantidad }}</b><button @click.stop="cambiarCant(i, 1)" tabindex="-1">+</button></span></td>
+                    <span v-else class="qtybox"><button @click.stop="cambiarCant(i, -1); enfocar()" tabindex="-1">−</button><b>{{ it.cantidad }}</b><button @click.stop="cambiarCant(i, 1); enfocar()" tabindex="-1">+</button></span></td>
                   <td class="num">{{ peso(it.precio) }}<span v-if="it.unidad === 'kg'" class="xs muted"> /kg</span></td>
                   <td class="num"><b>{{ peso(bruta(it) - (it.descuento || 0)) }}</b><div class="xs muted" v-if="it.valor">por valor</div></td>
                   <td><button class="btn sm ghost icon" @click.stop="quitar(i)" tabindex="-1" title="Quitar (Supr)"><Icono n="x"/></button></td>
