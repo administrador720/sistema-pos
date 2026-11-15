@@ -66,3 +66,50 @@ def test_si_un_boton_del_carrito_conserva_el_foco_el_lector_sigue_funcionando(pa
         assert pg.errores == []
     finally:
         cerrar(servidor, tk, turno)
+
+
+def agregar_a_mano(pg, nombre):
+    """Producto sin código de barras: se escribe el nombre en el campo, se abre la lista y se elige con Enter."""
+    campo = pg.locator(".scan input")
+    campo.fill(nombre); campo.press("Enter")
+    pg.wait_for_selector(".modal .res-fila")
+    pg.keyboard.press("Enter")
+    pg.wait_for_selector(".modal", state="detached")
+
+
+def test_primer_producto_a_mano_subir_con_el_mouse_y_escanear_otro(pagina, servidor):
+    """El caso reportado: «sigue cuando el primer producto se registra manual, sin código de barras»."""
+    pg = pagina
+    entrar(pg, "luis", "luis1234")
+    tk, turno = con_turno(servidor)
+    try:
+        pg.goto(servidor + "#/caja"); pg.wait_for_selector(".caja")
+        agregar_a_mano(pg, "kumis")
+        assert filas(pg) == [("Kumis 1 L", "1")]
+        pg.locator(".cart tbody tr").nth(0).locator("button", has_text="+").click()      # 2 con el mouse
+        pg.keyboard.type(ean13(5)); pg.keyboard.press("Enter")                           # el lector escribe sin tocar el campo
+        pg.wait_for_function("document.querySelectorAll('.cart tbody tr').length === 2")
+        assert filas(pg) == [("Kumis 1 L", "2"), ("Mantequilla 250 g", "1")]
+        assert pg.errores == []
+    finally:
+        cerrar(servidor, tk, turno)
+
+
+def test_cantidad_con_asterisco_tambien_vale_para_productos_buscados_por_nombre(pagina, servidor):
+    """«2*kumis» antes perdía la cantidad (quedaba 1): por eso se terminaba subiendo con el botón +."""
+    pg = pagina
+    entrar(pg, "luis", "luis1234")
+    tk, turno = con_turno(servidor)
+    try:
+        pg.goto(servidor + "#/caja"); pg.wait_for_selector(".caja")
+        agregar_a_mano(pg, "2*kumis")
+        assert filas(pg) == [("Kumis 1 L", "2")]
+        scan = pg.locator(".scan input")
+        scan.fill("3*"); scan.press("Enter")                                             # y también en dos pasos: «3*» y luego el nombre
+        agregar_a_mano(pg, "yogurt")
+        assert filas(pg)[-1] == ("Yogurt fresa 1 L", "3")
+        scan.fill("2*" + ean13(5)); scan.press("Enter"); pg.wait_for_timeout(400)         # con código sigue igual
+        assert filas(pg)[-1] == ("Mantequilla 250 g", "2")
+        assert pg.errores == []
+    finally:
+        cerrar(servidor, tk, turno)

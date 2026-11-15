@@ -81,4 +81,5 @@ if (Test-Path $icono) { throw "El ícono del escritorio no se quitó" }
 if (-not (Test-Path $datos)) { throw "La desinstalación borró la carpeta de datos (no debe)" }
 netsh advfirewall firewall show rule name="$regla" | Out-Null
 if ($LASTEXITCODE -eq 0) { throw "La regla de firewall «$regla» no se quitó al desinstalar" }
-Write-Host "Instalador OK: instala, crea íconos, actualiza con el programa abierto y desinstala conservando los datos."
+Write-Host "Instalador OK: instala, crea íconos y regla de firewall, actualiza con el programa abierto y desinstala conservando los datos."
+exit 0   # el último netsh devuelve 1 cuando la regla ya no existe (lo esperado); sin esto el script terminaría con ese código

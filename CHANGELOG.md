@@ -11,6 +11,10 @@ Cada versión publicada aparece en el botón **Configuración → Actualizacione
 - Seguridad: el acceso desde celulares viene **apagado**; se activa en Configuración → Celulares. Cada celular se vincula con un código de 6 números o un QR y se puede desvincular en cualquier momento. Solo entra el administrador, y desde el celular no se puede anular ventas, restaurar respaldos, cambiar usuarios ni actualizar el programa.
 - El instalador de Windows abre el firewall solo para redes privadas.
 
+**Correcciones en la caja**
+- Al subir la cantidad con el botón **+** del mouse y luego escanear otro producto, el programa sumaba una unidad de más al producto anterior (2 cigarrillos y 1 chicle aparecían como 3 cigarrillos) y el producto nuevo no se registraba. Pasaba sobre todo con productos agregados a mano, sin código de barras. Ya no pasa.
+- Escribir la cantidad junto al nombre, por ejemplo `2*kumis`, perdía la cantidad. Ahora se respeta (también `2*` y luego el nombre).
+
 ## 1.1.1
 
 **Corrección en la caja**

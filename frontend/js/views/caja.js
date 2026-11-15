@@ -520,15 +520,20 @@ export const Caja = {
       m = txt.match(/^(\d{1,3}(?:[.,]\d{1,3})?)\s*[*xX]\s*(.+)$/);        // "6*7701234" → cantidad + código
       let cant = explicita.value ? cantPend.value : null;
       if (m) { cant = num(m[1]); txt = m[2]; }
-      if (!/^[\w-]+$/.test(txt) || !/\d/.test(txt)) { buscarInicial.value = txt; dlg.value = 'buscar'; return; }   // texto: buscar por nombre
+      if (!/^[\w-]+$/.test(txt) || !/\d/.test(txt)) {   // texto: buscar por nombre
+        if (cant) { cantPend.value = cant; explicita.value = true; }   // «2*leche»: la cantidad espera a que se elija el producto
+        buscarInicial.value = txt; dlg.value = 'buscar'; return;
+      }
       ocupado.value = true;
       try {
         const prod = await api.get('/api/productos/codigo/' + encodeURIComponent(txt));
         elegirProducto(prod, cant, prod.unidades_por_codigo || 1);
       } catch (e) {
-        beep('error'); cantPend.value = 1; explicita.value = false;
-        if (e.codigo === 'CODIGO_NO_EXISTE' && esAdmin()) { codigoNuevo.value = txt; dlg.value = 'rapido'; }
-        else errorToast(e);
+        beep('error');
+        if (e.codigo === 'CODIGO_NO_EXISTE' && esAdmin()) {   // se crea el producto y se le agrega la cantidad pedida
+          if (cant) { cantPend.value = cant; explicita.value = true; } else { cantPend.value = 1; explicita.value = false; }
+          codigoNuevo.value = txt; dlg.value = 'rapido';
+        } else { cantPend.value = 1; explicita.value = false; errorToast(e); }
       } finally { ocupado.value = false; enfocar(); }
     }
 
