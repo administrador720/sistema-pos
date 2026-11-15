@@ -183,7 +183,7 @@ jobs:
   android-emulador:
     needs: android
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
 
@@ -193,7 +193,7 @@ jobs:
           cache: pip
           cache-dependency-path: backend/requirements.txt
 
-      - run: python -m pip install -r backend/requirements-dev.txt
+      - run: python -m pip install -r backend/requirements.txt websocket-client
 
       - uses: actions/download-artifact@v4
         with:
