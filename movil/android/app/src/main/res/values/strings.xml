@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">POS Móvil</string>
+    <string name="title_activity_main">POS Móvil</string>
+    <string name="package_name">com.possupermercado.movil</string>
+    <string name="custom_url_scheme">com.possupermercado.movil</string>
+</resources>

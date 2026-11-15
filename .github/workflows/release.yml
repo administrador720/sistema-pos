@@ -115,3 +115,121 @@ jobs:
           gh release create "v$v" $archivo "$archivo.sha256" --title "POS Supermercado $v" --notes-file notas.md --target $env:GITHUB_SHA --latest
           if ($LASTEXITCODE -ne 0) { throw "No se pudo crear la versión v$v (¿ya existe?)" }
           Write-Host "Publicada: https://github.com/${{ github.repository }}/releases/tag/v$v"
+
+  # ───────────────────────── App del celular (Android) ─────────────────────────
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: movil/package-lock.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Versión
+        id: ver
+        run: |
+          v=$(tr -d '[:space:]' < VERSION)
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "Versión $v"
+
+      - name: Íconos de la app (logo del negocio si existe installer/logo.png)
+        run: |
+          python -m pip install pillow
+          python scripts/hacer_icono.py --android movil/android/app/src/main/res
+
+      - name: Dependencias y páginas de la app
+        working-directory: movil
+        run: |
+          npm ci
+          npx cap sync android
+
+      - name: Construir las apps (APK de depuración para probar y APK firmado para entregar)
+        working-directory: movil/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug assembleRelease -Ppos.version=${{ steps.ver.outputs.version }} --no-daemon --stacktrace
+
+      - name: Preparar archivos
+        run: |
+          v=${{ steps.ver.outputs.version }}
+          mkdir -p salida
+          cp movil/android/app/build/outputs/apk/release/app-release.apk "salida/POS-Movil-$v.apk"
+          cp movil/android/app/build/outputs/apk/debug/app-debug.apk salida/POS-Movil-depuracion.apk
+          (cd salida && sha256sum "POS-Movil-$v.apk" > "POS-Movil-$v.apk.sha256" && cat "POS-Movil-$v.apk.sha256")
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          "$APKSIGNER" verify --print-certs "salida/POS-Movil-$v.apk"
+          ls -la salida
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk-movil
+          path: |
+            salida/POS-Movil-*.apk
+            salida/POS-Movil-*.sha256
+
+  android-emulador:
+    needs: android
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - run: python -m pip install -r backend/requirements-dev.txt
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: apk-movil
+          path: salida
+
+      - name: Permitir el emulador (KVM)
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Probar la app en un emulador (vincular, entrar y consultar contra el servidor)
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: bash scripts/ci/probar_apk.sh salida/POS-Movil-depuracion.apk
+
+  publicar-apk:
+    needs: [windows, android]
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.publicar
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: apk-movil
+          path: salida
+      - name: Agregar el APK a la versión publicada
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v=$(tr -d '[:space:]' < VERSION)
+          gh release upload "v$v" "salida/POS-Movil-$v.apk" "salida/POS-Movil-$v.apk.sha256" --clobber --repo "$GITHUB_REPOSITORY"
+          echo "APK agregado a https://github.com/$GITHUB_REPOSITORY/releases/tag/v$v"

@@ -12,7 +12,8 @@ sys.path.insert(0, BACKEND)   # para que collect_submodules("app") encuentre el 
 
 ocultos = (collect_submodules("uvicorn") + collect_submodules("app") + collect_submodules("argon2")
            + ["sqlalchemy.dialects.sqlite", "multipart", "python_multipart", "openpyxl", "serial", "email.mime.text"])
-datos = [(os.path.join(RAIZ, "frontend"), "frontend"), (os.path.join(RAIZ, "VERSION"), ".")] + collect_data_files("reportlab")
+datos = [(os.path.join(RAIZ, "frontend"), "frontend"), (os.path.join(RAIZ, "movil", "www"), "movil"),
+         (os.path.join(RAIZ, "VERSION"), ".")] + collect_data_files("reportlab")
 binarios = []
 if sys.platform == "win32":
     ocultos += ["win32print", "win32timezone", "win32com", "win32com.client"]

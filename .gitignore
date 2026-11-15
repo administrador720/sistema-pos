@@ -15,3 +15,11 @@ node_modules/
 /tmp/
 capturas/
 installer/icono.ico
+movil/node_modules/
+movil/android/.gradle/
+movil/android/app/build/
+movil/android/build/
+movil/android/local.properties
+movil/android/app/src/main/assets/public/
+movil/android/app/src/main/assets/capacitor.config.json
+movil/android/app/src/main/assets/capacitor.plugins.json

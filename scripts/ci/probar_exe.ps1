@@ -76,7 +76,9 @@ try {
   $cod = Llamar POST "/api/movil/codigo" $null $t
   $viv = Invoke-RestMethod "http://${dir}:$pm/api/movil/vincular" -Method Post -ContentType "application/json" -Body (@{ codigo = $cod.codigo; nombre = "CI" } | ConvertTo-Json) -TimeoutSec 10
   if (-not $viv.token) { throw "No se pudo vincular un celular de prueba" }
-  Write-Host "  Celular vinculado y API reducida OK."
+  $pagina = Invoke-WebRequest "http://${dir}:$pm/m/" -UseBasicParsing -TimeoutSec 10
+  if ($pagina.Content -notmatch "POS M") { throw "Las pantallas de la app del celular (/m/) no están en el paquete" }
+  Write-Host "  Celular vinculado, API reducida y pantallas /m/ OK."
   Llamar POST "/api/movil/habilitar" @{ habilitado = $false } $t | Out-Null
 
   # ventana de escritorio (WebView2): el proceso debe tener una ventana con el nombre del programa

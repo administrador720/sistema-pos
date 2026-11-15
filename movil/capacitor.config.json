@@ -1,0 +1,15 @@
+{
+  "appId": "com.possupermercado.movil",
+  "appName": "POS Móvil",
+  "webDir": "www",
+  "android": {
+    "allowMixedContent": true
+  },
+  "server": {
+    "androidScheme": "http",
+    "cleartext": true
+  },
+  "plugins": {
+    "CapacitorHttp": { "enabled": true }
+  }
+}

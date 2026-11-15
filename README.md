@@ -131,6 +131,39 @@ El supermercado vende verduras por kilo y con mucha variedad. Cada una se crea c
 * No se puede cambiar la unidad de un producto que ya tiene movimientos (confundiría el historial): desactívelo y cree uno nuevo.
 * Los informes suman unidades y kilos en la misma columna («Unid. / kg»); el panel cuenta como «artículos por tiquete» solo las unidades.
 
+## App del celular (Android)
+
+**POS Móvil** es una app de Android que se conecta por el **Wi-Fi de la tienda** al programa del computador (no usa internet). Sirve para lo que se hace caminando por la tienda, con la **cámara como lector de códigos de barras**:
+
+![App del celular](docs/img/movil-pantallas.png)
+
+| Función | Qué hace |
+|---|---|
+| **Consultar precio y stock** | Escanea un producto y muestra precio, existencias, ubicación, costo y margen. |
+| **Contar inventario** | Captura ciega para el conteo que el administrador inició en el computador (no muestra cuánto debería haber). |
+| **Facturas de compra** | Escanea lo que llegó, indica cantidad y costo, y actualiza existencias y costo promedio. |
+| **Vender y cobrar** | Carrito con efectivo (devuelta) o banco; también verduras por peso. Necesita la caja abierta. |
+| **Panel de ventas** | Ventas, tiquetes, margen, cómo pagaron, lo más vendido y alertas de inventario (hoy, 7 días, mes). |
+
+**Instalar (una vez):**
+1. En el computador: **Configuración → Celulares → Activar el acceso de celulares** (viene apagado).
+2. En el celular descargue **`POS-Movil-….apk`** de la [página de versiones](https://github.com/administrador720/sistema-pos/releases/latest) y ábralo (Android pedirá permitir instalar desde esa fuente; también puede avisar que no es de Play Store).
+3. Con el celular en el **mismo Wi-Fi**: en el computador **Vincular un celular** (aparece un QR y un código de 6 números) y en la app **Escanear el QR**. Después entre con su usuario administrador.
+
+**Seguridad** (la ventana del programa nunca se abre a la red):
+* El acceso desde celulares **viene apagado**. Al activarlo se abre un segundo puerto (8766) solo para la red local; Windows lo permite únicamente en redes «Privadas».
+* Cada celular se **vincula** con un código de un solo uso (vale 5 minutos, 5 intentos, bloqueo por dirección) y recibe una llave propia; sin esa llave la red local no puede usar la API. Se desvincula en el computador cuando quiera.
+* Solo entra el **administrador**, y el celular solo ve una API reducida: **no puede** anular ventas, hacer devoluciones, restaurar respaldos, crear usuarios, cambiar ajustes ni actualizar el programa. Eso se hace solo en el computador.
+* Todo queda en la auditoría (vinculado / desvinculado / activado / apagado).
+
+**Si el celular no conecta:** mismo Wi-Fi (no datos móviles); Windows con esa red como «Privada»; el programa abierto en el computador; la dirección del computador puede cambiar (reserve una fija en el router).
+
+**Para quien mantiene el programa:**
+* Las pantallas de la app están en `movil/www/` (JavaScript sin compilar, como el resto) y también se sirven en `http://IP:8766/m/` para probarlas desde el navegador del teléfono (sin cámara: ahí se escribe el código o se usa un lector Bluetooth).
+* El APK lo construye GitHub Actions con **Capacitor** (envoltorio) + lector de Google (ML Kit); se firma con la llave `movil/android/app/pos-movil.keystore`. **Esa llave está en el repositorio (es pública)**: sirve para que el celular acepte actualizar encima de la versión anterior, pero no es un secreto. Para firmar con una llave privada, cree los secretos `POS_KEYSTORE_PASSWORD`, `POS_KEY_ALIAS`, `POS_KEY_PASSWORD` y pase el archivo en `POS_KEYSTORE`.
+* Con el logo del negocio en `installer/logo.png`, el ícono del instalador **y el de la app del celular** salen de ahí.
+* Aún **no probado en un celular real**: sí está probado en un emulador de Android (la app instalada se vincula con el servidor, entra y consulta), pero el lector de cámara no se puede probar sin un teléfono. Si algo falla en su celular, dígame el modelo y la versión de Android.
+
 ## Olvidé mi contraseña
 
 * **Es cajero:** el administrador la cambia en *Configuración → Usuarios* (clic en el usuario → nueva contraseña o PIN).
@@ -206,4 +239,4 @@ El servidor solo escucha en `127.0.0.1` y rechaza peticiones cuyo `Host` no sea 
 
 ## Limitaciones conocidas
 
-No incluye (aún): balanza conectada por cable (hoy el cajero escribe el peso) o etiquetas de balanza con el precio en el código de barras, impresión directa en térmica, facturación DIAN, varias cajas en red, crédito (fiado), lotes y vencimientos, promociones, clientes en la pantalla de venta (la API ya los soporta). Ver `docs/plan.md` (fase 7).
+No incluye (aún): balanza conectada por cable (hoy el cajero escribe el peso) o etiquetas de balanza con el precio en el código de barras, app para iPhone, celulares con usuarios que no sean administrador, impresión directa en térmica, facturación DIAN, varias cajas en red, crédito (fiado), lotes y vencimientos, promociones, clientes en la pantalla de venta (la API ya los soporta). Ver `docs/plan.md` (fase 7).
