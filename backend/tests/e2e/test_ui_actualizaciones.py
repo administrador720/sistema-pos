@@ -3,6 +3,8 @@ import json
 
 import pytest
 
+from app import config
+
 from .conftest import entrar
 
 pytestmark = pytest.mark.e2e
@@ -39,7 +41,7 @@ def test_aviso_descarga_e_instalacion(pagina):
     # aviso en la barra superior y versión en el menú lateral
     pg.wait_for_selector(".nueva-version")
     assert "9.9.9" in pg.locator(".nueva-version").inner_text()
-    assert "Versión 1.1.0" in pg.locator(".side-foot").inner_text()
+    assert f"Versión {config.VERSION}" in pg.locator(".side-foot").inner_text()
 
     pg.click(".nueva-version")
     pg.wait_for_selector("h2:has-text('Versión 9.9.9 disponible')")
